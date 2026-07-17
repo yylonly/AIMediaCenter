@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.6
+# BuildKit syntax directive removed to avoid fetching the frontend image on offline builds.
 
 # ---------- deps ----------
 FROM node:20-alpine AS deps

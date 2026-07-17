@@ -83,6 +83,33 @@ export default function SettingsPage() {
     else toast.error(d.error || 'TMDB 连接失败');
   }
 
+  // Change password
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  const [pwLoading, setPwLoading] = useState(false);
+
+  async function changePassword() {
+    if (!pw.current || !pw.next) return toast.error('请填写当前密码和新密码');
+    if (pw.next !== pw.confirm) return toast.error('两次输入的新密码不一致');
+    if (pw.next.length < 6) return toast.error('新密码至少 6 位');
+    setPwLoading(true);
+    try {
+      const r = await fetch('/api/auth/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: pw.current, newPassword: pw.next })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      toast.success('密码已修改，请重新登录');
+      setPw({ current: '', next: '', confirm: '' });
+      // Token remains valid; new password takes effect on next login.
+    } catch (e) {
+      toast.error(`修改失败：${(e as Error).message}`);
+    } finally {
+      setPwLoading(false);
+    }
+  }
+
   // Backup / restore
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -248,6 +275,20 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             支持 Nunjucks 语法，可用变量：title、year、season、episode、resourcePix、videoEncode、audioEncode、releaseGroup、fileExt、tmdbid 等。
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>账号安全</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {field('当前密码', <Input type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} placeholder="输入当前密码" />)}
+          {field('新密码', <Input type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="至少 6 位" />)}
+          {field('确认新密码', <Input type="password" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} placeholder="再次输入新密码" />)}
+          <div className="text-right">
+            <Button variant="outline" size="sm" onClick={changePassword} disabled={pwLoading}>
+              {pwLoading ? '修改中…' : '修改密码'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
