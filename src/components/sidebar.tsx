@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -32,11 +32,16 @@ const nav = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
 
   async function logout() {
-    await fetch('/api/access-token', { method: 'DELETE' });
-    router.replace('/login');
+    try {
+      await fetch('/api/access-token', { method: 'DELETE', credentials: 'include' });
+    } catch {
+      /* ignore network errors; still navigate away */
+    }
+    // Hard navigation ensures middleware re-runs and the login page loads fresh.
+    // router.replace() may not re-trigger middleware on client-side nav.
+    window.location.href = '/login';
   }
 
   return (

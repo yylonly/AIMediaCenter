@@ -29,11 +29,25 @@ const EMPTY: Cfg = {
 export default function SettingsPage() {
   const [cfg, setCfg] = useState<Cfg>(EMPTY);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/config')
-      .then((r) => r.json())
-      .then((d) => setCfg({ ...EMPTY, ...d }));
+      .then(async (r) => {
+        if (!r.ok) {
+          // 401 means the cookie expired; values fall back to EMPTY defaults.
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.error || `HTTP ${r.status}`);
+        }
+        return r.json();
+      })
+      .then((d) => {
+        setCfg({ ...EMPTY, ...d });
+        setLoadError(null);
+      })
+      .catch((e) => {
+        setLoadError(`配置加载失败：${e.message}。请检查登录状态后刷新页面。`);
+      });
   }, []);
 
   async function save() {
@@ -135,6 +149,12 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-semibold">设置</h1>
         <p className="text-sm text-muted-foreground">配置外部服务与路径策略</p>
       </div>
+
+      {loadError && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950 p-3 text-sm text-amber-700 dark:text-amber-300">
+          {loadError}
+        </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle>TMDB</CardTitle></CardHeader>

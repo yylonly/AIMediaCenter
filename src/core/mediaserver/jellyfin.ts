@@ -1,4 +1,6 @@
-// Jellyfin adapter — refresh library + sync existing items.
+// Jellyfin adapter - refresh library + sync existing items.
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { prisma } from '@/lib/prisma';
 
 interface JellyfinCfg {
@@ -26,6 +28,7 @@ function authHeaders(apiKey: string) {
 }
 
 /** POST /Library/Refresh — triggers a global scan (Jellyfin doesn't expose per-item refresh well). */
+/** POST /Library/Refresh - triggers a global scan of all libraries. */
 export async function refreshJellyfin(): Promise<boolean> {
   const cfg = await loadCfg();
   if (!cfg) return false;
@@ -36,6 +39,83 @@ export async function refreshJellyfin(): Promise<boolean> {
   } catch (e) {
     console.warn('[jellyfin] refresh failed', (e as Error).message);
     return false;
+  }
+}
+
+/**
+ * POST /Items/{itemId}/Refresh - refresh metadata for a single item.
+ * Recursive=true cascades into seasons/episodes of a Series.
+ * ReplaceAllMetadata=false keeps existing fields, only fills missing ones.
+ */
+export async function refreshItemMetadata(
+  itemId: string,
+  opts?: { recursive?: boolean; replaceAll?: boolean }
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = await loadCfg();
+  if (!cfg) return { ok: false, error: 'not configured' };
+  try {
+    const url = new URL(cfg.url.replace(/\/$/, '') + `/Items/${encodeURIComponent(itemId)}/Refresh`);
+    url.searchParams.set('Recursive', String(opts?.recursive ?? false));
+    url.searchParams.set('MetadataRefreshMode', 'FullRefresh');
+    url.searchParams.set('ImageRefreshMode', 'FullRefresh');
+    url.searchParams.set('ReplaceAllMetadata', String(opts?.replaceAll ?? false));
+    url.searchParams.set('ReplaceAllImages', String(opts?.replaceAll ?? false));
+    const res = await fetch(url.toString(), { method: 'POST', headers: authHeaders(cfg.apiKey) });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/**
+ * Move a media item's files on the filesystem to a new destination directory,
+ * then refresh Jellyfin to reindex. Jellyfin has no REST "move" endpoint, so
+ * this physically relocates the path recorded in MediaServerItem and triggers
+ * a global library scan.
+ *
+ * - For Series, `itemPath` is the show folder (we move the whole folder).
+ * - For Movie, `itemPath` is the file itself.
+ *
+ * `destDir` is the new parent directory (lib root); the basename is preserved.
+ * Returns the new absolute path on success.
+ */
+export async function moveMediaItem(
+  itemId: string,
+  itemPath: string,
+  destDir: string,
+  isSeries: boolean
+): Promise<{ ok: boolean; newPath?: string; error?: string }> {
+  if (!itemPath) return { ok: false, error: 'item has no path' };
+  try {
+    const base = path.basename(itemPath);
+    const dest = path.join(destDir, base);
+    // Create dest parent if missing
+    await fs.mkdir(destDir, { recursive: true });
+    // Reject if dest already exists (avoid clobbering)
+    try {
+      await fs.lstat(dest);
+      return { ok: false, error: `目标已存在：${dest}` };
+    } catch {
+      /* not exists - continue */
+    }
+    // Physically move
+    await fs.rename(itemPath, dest);
+    // Update DB cache to reflect new path
+    await prisma.mediaServerItem.updateMany({
+      where: { server: 'jellyfin', itemId },
+      data: { path: dest }
+    });
+    // Trigger a global library scan so Jellyfin reindexes (best effort)
+    await refreshJellyfin().catch(() => {});
+    return { ok: true, newPath: dest };
+  } catch (e) {
+    const msg = (e as Error).message;
+    // EXDEV (cross-device) would need copy+remove; surface the error instead.
+    return { ok: false, error: msg };
   }
 }
 
