@@ -69,6 +69,20 @@ export default function SettingsPage() {
     else toast.error(d.error || 'Jellyfin 连接失败');
   }
 
+  async function testQb() {
+    const r = await fetch('/api/qb/test', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) toast.success(`qBittorrent 连接正常（${d.version}）`);
+    else toast.error(d.error || 'qBittorrent 连接失败');
+  }
+
+  async function testTmdb() {
+    const r = await fetch('/api/tmdb/test', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) toast.success('TMDB 连接正常');
+    else toast.error(d.error || 'TMDB 连接失败');
+  }
+
   // Backup / restore
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -167,6 +181,9 @@ export default function SettingsPage() {
               placeholder="来自 https://www.themoviedb.org/settings/api"
             />
           )}
+          <div className="text-right">
+            <Button variant="outline" size="sm" onClick={testTmdb}>测试连接</Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -178,6 +195,9 @@ export default function SettingsPage() {
           {field('密码', <Input type="password" value={cfg.qb.password} onChange={(e) => set('qb', 'password', e.target.value)} />)}
           {field('电影分类', <Input value={cfg.qb.categoryMovie} onChange={(e) => set('qb', 'categoryMovie', e.target.value)} />)}
           {field('剧集分类', <Input value={cfg.qb.categoryTv} onChange={(e) => set('qb', 'categoryTv', e.target.value)} />)}
+          <div className="text-right">
+            <Button variant="outline" size="sm" onClick={testQb}>测试连接</Button>
+          </div>
         </CardContent>
       </Card>
 

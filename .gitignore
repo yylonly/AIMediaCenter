@@ -31,6 +31,8 @@ coverage/
 docker/config/
 docker/downloads/
 docker/media/
+docker/jellyfin/
+docker/qbittorrent/
 
 # local media library runtime data (movies/tv downloaded by the app)
 library/

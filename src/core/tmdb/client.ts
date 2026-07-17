@@ -248,3 +248,15 @@ export async function tmdbTopRated(
     return [];
   }
 }
+
+/** Lightweight connectivity check: run a trivial multi-search to validate the API key. */
+export async function testTmdb(): Promise<{ ok: boolean; error?: string }> {
+  const tmdb = await getTmdb();
+  if (!tmdb) return { ok: false, error: 'TMDB API Key 未配置' };
+  try {
+    await tmdb.searchMulti({ query: 'test', include_adult: false });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}

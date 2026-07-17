@@ -308,3 +308,15 @@ export async function removeTorrent(hash: string, deleteFiles = false) {
     return false;
   }
 }
+
+/** Lightweight connectivity check: fetch the qBittorrent app version. */
+export async function testQb(): Promise<{ ok: boolean; version?: string; error?: string }> {
+  const qb = await getQb();
+  if (!qb) return { ok: false, error: 'qBittorrent 未配置' };
+  try {
+    const version = await qb.version();
+    return { ok: true, version };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
