@@ -1,0 +1,33 @@
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: aimediacenter
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/config/aimediacenter.db
+      - JWT_SECRET=${JWT_SECRET:-change-me-please-a-long-random-string}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=10080
+      - SUPERUSER=${SUPERUSER:-admin}
+      - SUPERUSER_PASSWORD=${SUPERUSER_PASSWORD:-admin}
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - QB_URL=${QB_URL:-http://qbittorrent:8080}
+      - QB_USERNAME=${QB_USERNAME:-admin}
+      - QB_PASSWORD=${QB_PASSWORD:-adminadmin}
+      - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      - DOWNLOAD_DIR=/downloads
+      - LIBRARY_DIR_MOVIE=/media/movies
+      - LIBRARY_DIR_TV=/media/tv
+      - TRANSFER_TYPE=link
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
+      - ./media/movies:/media/movies
+      - ./media/tv:/media/tv

@@ -1,0 +1,42 @@
+# Production deployment compose for NAS (pulls prebuilt image from GHCR).
+# Place this file at /volume1/docker/aimediacenter/docker-compose.yml on the NAS
+# and keep a sibling .env file with your secrets next to it.
+
+services:
+  app:
+    image: ghcr.io/yylonly/aimediacenter:latest
+    container_name: aimediacenter
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/config/aimediacenter.db
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-10080}
+      - SUPERUSER=${SUPERUSER:-admin}
+      - SUPERUSER_PASSWORD=${SUPERUSER_PASSWORD:?SUPERUSER_PASSWORD must be set in .env}
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - QB_URL=${QB_URL:-http://qbittorrent:8080}
+      - QB_USERNAME=${QB_USERNAME:-admin}
+      - QB_PASSWORD=${QB_PASSWORD:-adminadmin}
+      - QB_CATEGORY_MOVIE=${QB_CATEGORY_MOVIE:-movies}
+      - QB_CATEGORY_TV=${QB_CATEGORY_TV:-tv}
+      - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      - DOWNLOAD_DIR=/downloads
+      - LIBRARY_DIR_MOVIE=/media/movies
+      - LIBRARY_DIR_TV=/media/tv
+      - TRANSFER_TYPE=${TRANSFER_TYPE:-link}
+      - MOVIE_RENAME_FORMAT=${MOVIE_RENAME_FORMAT:-{{title}} ({{year}})/{{title}} ({{year}}){{ ' - ' + resourcePix if resourcePix }}{{fileExt}}}
+      - TV_RENAME_FORMAT=${TV_RENAME_FORMAT:-{{title}} ({{year}})/Season {{season}}/{{title}} - S{{season | pad2}}E{{episode | pad2}}{{fileExt}}}
+      - CRON_SUBSCRIBE_SEARCH=${CRON_SUBSCRIBE_SEARCH:-0 */8 * * *}
+      - CRON_SUBSCRIBE_REFRESH=${CRON_SUBSCRIBE_REFRESH:-*/30 * * * *}
+      - CRON_TRANSFER_POLL=${CRON_TRANSFER_POLL:-* * * * *}
+      - CRON_MEDIASERVER_SYNC=${CRON_MEDIASERVER_SYNC:-0 3 * * *}
+    volumes:
+      - /volume1/docker/aimediacenter/config:/config
+      - /volume1/docker/aimediacenter/downloads:/downloads
+      - /volume1/docker/aimediacenter/media/movies:/media/movies
+      - /volume1/docker/aimediacenter/media/tv:/media/tv

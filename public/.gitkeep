@@ -1,0 +1,2 @@
+# Placeholder so the public/ directory is tracked by git.
+# Next.js build and the Docker image both expect this directory to exist.

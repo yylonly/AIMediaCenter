@@ -1,0 +1,211 @@
+// AIMediaCenter Prisma schema
+// See prisma docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             Int      @id @default(autoincrement())
+  name           String   @unique
+  email          String?
+  hashedPassword String
+  isActive       Boolean  @default(true)
+  isSuperuser    Boolean  @default(false)
+  avatar         String?
+  otpSecret      String?
+  createdAt      DateTime @default(now())
+}
+
+model Site {
+  id            Int      @id @default(autoincrement())
+  name          String
+  domain        String   @unique
+  url           String
+  pri           Int      @default(1)
+  cookie        String?
+  ua            String?
+  passkey       String?
+  // Auto-login credentials (stored locally for NexusPHP sites)
+  username      String?
+  password      String?
+  proxy         Boolean  @default(false)
+  render        Boolean  @default(false)
+  publicSite    Boolean  @default(true)
+  isActive      Boolean  @default(true)
+  limitInterval Int      @default(0)
+  limitCount    Int      @default(0)
+  timeout       Int      @default(15)
+  note          String?
+  lstModDate    DateTime @default(now()) @updatedAt
+}
+
+model Subscribe {
+  id                 Int      @id @default(autoincrement())
+  name               String
+  year               String?
+  type               String   // "movie" | "tv"
+  tmdbid             Int?
+  imdbid             String?
+  season             Int?
+  poster             String?
+  backdrop           String?
+  vote               Float?
+  description        String?
+  filter             String?
+  include            String?
+  exclude            String?
+  quality            String?
+  resolution         String?
+  totalEpisode       Int?
+  startEpisode       Int?
+  lackEpisode        Int?
+  note               String?  // JSON of downloaded episode numbers
+  state              String   @default("R")  // R=running, P=paused
+  lastUpdate         DateTime @default(now())
+  createdAt          DateTime @default(now())
+  username           String?
+  sites              String?  // JSON int[] site ids
+  bestVersion        Boolean  @default(false)
+  currentPriority    Int?
+  savePath           String?
+
+  @@index([tmdbid])
+  @@index([state])
+}
+
+model SubscribeHistory {
+  id           Int      @id @default(autoincrement())
+  name         String
+  year         String?
+  type         String
+  tmdbid       Int?
+  season       Int?
+  poster       String?
+  description  String?
+  totalEpisode Int?
+  createdAt    DateTime @default(now())
+  completedAt  DateTime @default(now())
+}
+
+model DownloadHistory {
+  id                 Int      @id @default(autoincrement())
+  path               String
+  type               String
+  title              String
+  year               String?
+  tmdbid             Int?
+  imdbid             String?
+  seasons            String?
+  episodes           String?
+  image              String?
+  downloadHash       String?  @unique
+  torrentName        String?
+  torrentDescription String?
+  torrentSite        String?
+  userid             String?
+  username           String?
+  createdAt          DateTime @default(now())
+  note               String?
+
+  @@index([tmdbid])
+  @@index([downloadHash])
+}
+
+model DownloadFiles {
+  id           Int    @id @default(autoincrement())
+  downloadHash String
+  downloader   String
+  fullpath     String
+  savepath     String
+  filepath     String
+  torrentname  String
+  state        Int    @default(1) // 1=normal, 0=deleted, 2=transferred
+
+  @@index([downloadHash])
+}
+
+model TransferHistory {
+  id           Int      @id @default(autoincrement())
+  src          String
+  dest         String?
+  mode         String   // link/copy/move/softlink
+  type         String
+  title        String
+  year         String?
+  tmdbid       Int?
+  imdbid       String?
+  seasons      String?
+  episodes     String?
+  image        String?
+  downloadHash String?
+  status       Boolean  @default(true)
+  errmsg       String?
+  createdAt    DateTime @default(now())
+  files        String?
+
+  @@index([src])
+  @@index([title])
+  @@index([tmdbid])
+  @@index([downloadHash])
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  channel   String
+  mtype     String
+  title     String
+  text      String?
+  image     String?
+  link      String?
+  userid    String?
+  createdAt DateTime @default(now())
+  action    Int      @default(1) // 0=received, 1=sent
+  note      String?
+
+  @@index([createdAt])
+}
+
+model MediaServerItem {
+  id            Int      @id @default(autoincrement())
+  server        String   // jellyfin
+  library       String
+  itemId        String
+  itemType      String   // Movie | Series
+  title         String
+  originalTitle String?
+  year          String?
+  tmdbid        Int?
+  imdbid        String?
+  path          String?
+  seasoninfo    String?
+  note          String?
+  lstModDate    DateTime @default(now()) @updatedAt
+
+  @@unique([server, itemId])
+  @@index([tmdbid])
+  @@index([title])
+}
+
+model SystemConfig {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String // JSON blob
+  note  String?
+}
+
+// Cache TMDB responses locally
+model MediaCache {
+  id        Int      @id @default(autoincrement())
+  tmdbid    Int
+  type      String
+  data      String
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([tmdbid, type])
+}
