@@ -37,8 +37,18 @@ export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      // Guards against enqueueing into an already-closed controller. After the
+      // timeout fires, aggregatedSearchStream resolves with partial results and
+      // this handler sends `done` + closes the stream, but the background
+      // per-site searches keep running and may still invoke onProgress.
+      let closed = false;
       const send = (obj: unknown) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          // controller was closed (client disconnect / timeout) - ignore.
+        }
       };
       try {
         const items = await aggregatedSearchStream(
@@ -49,7 +59,12 @@ export async function GET(req: NextRequest) {
       } catch (e) {
         send({ type: 'error', error: (e as Error).message });
       } finally {
-        controller.close();
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed - ignore
+        }
       }
     }
   });

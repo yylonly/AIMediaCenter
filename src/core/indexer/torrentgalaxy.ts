@@ -36,7 +36,10 @@ export const torrentgalaxy: Indexer = {
       const titleEl = $r.find('a[title]').first();
       const title = titleEl.attr('title') || titleEl.text().trim();
       const detailHref = $r.find('div.clickable-row').attr('data-href') || '';
-      const sizeText = $r.find('span.badge-secondary').text().trim();
+      // Size lives in span.badge-secondary, but the row has two of them
+      // (main + responsive), so .text() concatenates "721.3 MB721.3 MB" which
+      // parseSize rejects. Take only the first one.
+      const sizeText = $r.find('span.badge-secondary').first().text().trim();
       const size = parseSize(sizeText);
       // seeders: green font, peers: red font
       const greenB = $r.find('font[color="green"] b, font b[style*="green"]').text().trim();

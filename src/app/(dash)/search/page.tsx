@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -77,6 +78,7 @@ function saveSnapshot(s: SearchSnapshot) {
 }
 
 export default function SearchPage() {
+  const router = useRouter();
   const [snap, setSnap] = useState<SearchSnapshot>(DEFAULT_SNAPSHOT);
   const [loading, setLoading] = useState(false);
   const [sites, setSites] = useState<SiteOption[]>([]);
@@ -85,7 +87,12 @@ export default function SearchPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   // When set, triggers an automatic search once the URL keyword has been
   // hydrated into `snap.q`. Avoids stale-closure issues with doSearch().
+  // We do NOT clear this state from within the effect (calling setAutoSearchQ
+  // mid-search would re-run the effect, fire its cleanup with cancelled=true,
+  // and leave setLoading(false) never executed -> spinner hangs forever).
+  // Instead a ref dedupes so each value is processed exactly once.
   const [autoSearchQ, setAutoSearchQ] = useState<string | null>(null);
+  const handledAutoSearchQ = useRef<string | null>(null);
   // Live search progress from the streaming search endpoint.
   const [searchProgress, setSearchProgress] = useState<{
     current: number;
@@ -117,21 +124,40 @@ export default function SearchPage() {
   // autoSearchQ directly to avoid stale-closure reads of snap.
   useEffect(() => {
     if (!autoSearchQ) return;
+    // Dedupe: each distinct keyword is processed exactly once, even if the
+    // effect re-runs (React may re-run effects under some conditions). We
+    // deliberately do NOT clear autoSearchQ here - resetting it mid-search
+    // would re-trigger the effect cleanup (cancelled=true) and leave the
+    // loading overlay stuck forever.
+    if (handledAutoSearchQ.current === autoSearchQ) return;
+    handledAutoSearchQ.current = autoSearchQ;
     const q = autoSearchQ;
-    setAutoSearchQ(null);
+    // cancelled only guards against stale state updates after the user has
+    // navigated away. We still clear the loading overlay in finally so a
+    // cancelled search doesn't leave the spinner hanging.
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setSearchProgress({ current: 0, total: 0, site: '', found: 0 });
       update({ media: [], torrents: [], tmdbWarn: null, searched: true, selMedia: null });
-      const siteParam =
-        snap.selectedSites.length > 0 ? `&sites=${snap.selectedSites.join(',')}` : '';
-      const [m, t] = await Promise.all([
-        safeJson(`/api/media?q=${encodeURIComponent(q)}`, 'TMDB'),
-        safeJson(`/api/search?keyword=${encodeURIComponent(q)}${siteParam}`, '站点搜索')
-      ]);
-      if (cancelled) return;
-      update({ media: m.items || [], torrents: t.items || [], tmdbWarn: m.warning || null });
-      setLoading(false);
+      // TMDB runs in parallel with the streaming site search.
+      const tmdbPromise = safeJson(`/api/media?q=${encodeURIComponent(q)}`, 'TMDB');
+      try {
+        const torrents = await searchStreamSites(q, snap.selectedSites);
+        if (cancelled) return;
+        const m = await tmdbPromise;
+        if (cancelled) return;
+        update({ media: m.items || [], torrents, tmdbWarn: m.warning || null });
+      } catch (e) {
+        if (!cancelled) toast.error('搜索失败');
+      } finally {
+        // Always clear the overlay, even if cancelled - otherwise the spinner
+        // hangs forever when the user navigates during a search.
+        if (!cancelled) {
+          setLoading(false);
+          setSearchProgress(null);
+        }
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,7 +197,8 @@ export default function SearchPage() {
 
   const selectAllSites = useCallback(() => {
     setSnap((prev) => {
-      const next = { ...prev, selectedSites: sites.map((s) => s.domain) };
+      // Only select active sites - disabled ones shouldn't be searchable.
+      const next = { ...prev, selectedSites: sites.filter((s) => s.isActive).map((s) => s.domain) };
       saveSnapshot(next);
       return next;
     });
@@ -219,15 +246,15 @@ export default function SearchPage() {
       const decoder = new TextDecoder();
       let buffer = '';
       let items: TorrentItem[] = [];
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // SSE events are separated by a blank line; events may span chunks.
+
+      // Process any complete SSE events (separated by `\n\n`) in `buffer`.
+      // Returns nothing; mutates `items` and pushes progress via setSearchProgress.
+      const processBuffer = () => {
         let sep: number;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
           const rawEvent = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
+          // An SSE event may have multiple lines; we only care about `data:`.
           const dataLine = rawEvent
             .split('\n')
             .find((l) => l.startsWith('data:'));
@@ -246,16 +273,30 @@ export default function SearchPage() {
             throw new Error(payload.error || '搜索失败');
           }
         }
+      };
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        processBuffer();
       }
+      // Flush any trailing event in the buffer. The final `done` event may
+      // arrive in the same chunk that signals stream end, so it would be
+      // skipped if we only processed events inside the loop.
+      buffer += decoder.decode();
+      processBuffer();
       return items;
     } catch (e) {
       // Fallback to the non-streaming endpoint.
       console.warn('[search] stream failed, falling back:', (e as Error).message);
       const t = await safeJson(`/api/search?keyword=${encodeURIComponent(keyword)}${siteParam}`, '站点搜索');
       return t.items || [];
-    } finally {
-      setSearchProgress(null);
     }
+    // NOTE: searchProgress is intentionally NOT cleared here. The caller clears
+    // it after setLoading(false) so the overlay keeps showing "8/8" while the
+    // parallel TMDB request finishes, instead of dropping to the fallback
+    // "正在准备搜索…" text.
   }
 
   async function doSearch() {
@@ -270,6 +311,7 @@ export default function SearchPage() {
     const m = await tmdbPromise;
     update({ media: m.items || [], torrents, tmdbWarn: m.warning || null });
     setLoading(false);
+    setSearchProgress(null);
   }
 
   async function subscribe(m: { tmdbid: number; type: string; title: string }) {
@@ -289,8 +331,12 @@ export default function SearchPage() {
       body: JSON.stringify({ torrent: t, media: snap.selMedia })
     });
     const data = await res.json();
-    if (res.ok) toast.success('已加入下载队列');
-    else toast.error(data.error || '下载失败');
+    if (res.ok) {
+      toast.success('已加入下载队列');
+      router.push('/downloads');
+    } else {
+      toast.error(data.error || '下载失败');
+    }
   }
 
   const { q, media, torrents, selMedia, tmdbWarn, searched, selectedSites } = snap;
@@ -325,9 +371,38 @@ export default function SearchPage() {
     <div className="space-y-6">
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="flex flex-col items-center gap-3 rounded-lg bg-background px-10 py-8 shadow-xl">
+          <div className="flex w-80 flex-col items-center gap-4 rounded-lg bg-background px-10 py-8 shadow-xl">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            <p className="text-sm font-medium">正在搜索，请稍候…</p>
+            <div className="w-full space-y-2 text-center">
+              <p className="text-sm font-medium">正在搜索，请稍候…</p>
+              {searchProgress ? (
+                <>
+                  {searchProgress.total > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      站点 {searchProgress.current}/{searchProgress.total}
+                      {searchProgress.site ? `：${searchProgress.site}` : ''}
+                      {searchProgress.found > 0 ? `（已找到 ${searchProgress.found}）` : ''}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">正在连接站点…</p>
+                  )}
+                  {/* Progress bar */}
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-300"
+                      style={{
+                        width:
+                          searchProgress.total > 0
+                            ? `${Math.round((searchProgress.current / searchProgress.total) * 100)}%`
+                            : '0%'
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">正在准备搜索…</p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -374,13 +449,14 @@ export default function SearchPage() {
             </div>
             {sites.length > 0 ? (
               <>
-                {sites.some((s) => s.publicSite) && (
+                {/* Only active sites are selectable; disabled ones (isActive=false) are hidden. */}
+                {sites.some((s) => s.publicSite && s.isActive) && (
                   <div className="mb-3">
                     <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <Globe className="h-3 w-3" /> 公开站点
                     </div>
                     <div className="flex flex-wrap gap-3">
-                      {sites.filter((s) => s.publicSite).map((s) => (
+                      {sites.filter((s) => s.publicSite && s.isActive).map((s) => (
                         <label key={s.domain} className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
                             checked={selectedSites.includes(s.domain)}
@@ -392,13 +468,13 @@ export default function SearchPage() {
                     </div>
                   </div>
                 )}
-                {sites.some((s) => !s.publicSite) && (
+                {sites.some((s) => !s.publicSite && s.isActive) && (
                   <div>
                     <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <Lock className="h-3 w-3" /> 私有站点
                     </div>
                     <div className="flex flex-wrap gap-3">
-                      {sites.filter((s) => !s.publicSite).map((s) => (
+                      {sites.filter((s) => !s.publicSite && s.isActive).map((s) => (
                         <label key={s.domain} className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
                             checked={selectedSites.includes(s.domain)}

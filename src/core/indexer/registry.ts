@@ -80,9 +80,20 @@ async function resolveSearchSites(q: SearchQuery) {
     where.domain = { in: q.sites };
   }
   const sites = await prisma.site.findMany({ where, orderBy: { pri: 'asc' } });
+  // Build a set of domains the DB says are disabled, so we can skip them
+  // when synthesizing stubs for hard-coded public sites below. Without this,
+  // a disabled public site (isActive=false in DB) would still be searched
+  // whenever the client explicitly lists it in q.sites.
+  const disabled = await prisma.site.findMany({
+    where: { isActive: false },
+    select: { domain: true }
+  });
+  const disabledSet = new Set(disabled.map((s) => s.domain));
 
-  // Include hard-coded public sites that are selected but not in DB.
+  // Include hard-coded public sites that are selected but not in DB, but only
+  // if they haven't been explicitly disabled in the DB.
   for (const domain of q.sites || []) {
+    if (disabledSet.has(domain)) continue;
     if (REGISTRY[domain] && !sites.find((s) => s.domain === domain)) {
       const idx = REGISTRY[domain];
       sites.push({
@@ -147,35 +158,66 @@ export interface SearchProgress {
  * Streaming variant of aggregatedSearch. Runs the same per-site search with
  * the same concurrency, but invokes `onProgress` as each site completes so the
  * caller can push progress updates to the client. Returns the final deduped +
- * sorted result list once all sites are done.
+ * sorted result list once all sites are done, or once `timeoutMs` elapses
+ * (whichever comes first) - in the latter case the already-collected partial
+ * results are returned so the user sees something instead of hanging.
  */
 export async function aggregatedSearchStream(
   q: SearchQuery,
-  onProgress?: (p: SearchProgress) => void
+  onProgress?: (p: SearchProgress) => void,
+  timeoutMs = 60_000
 ): Promise<TorrentInfo[]> {
   const sites = await resolveSearchSites(q);
   const total = sites.length;
   let done = 0;
+  // Accumulates results from each site as it completes so the timeout can
+  // snapshot whatever has been collected so far.
+  const collected: TorrentInfo[] = [];
   const limit = pLimit(3);
-  const results = await Promise.all(
+
+  // Per-site timeout: a single slow/hung site shouldn't block the whole
+  // search until the 60s global timeout. Use the site's configured `timeout`
+  // (seconds, default 15) with a 20s cap so a misconfigured large value
+  // can't stall everything. Resolves to [] (treated as "no results") on
+  // timeout - the site still counts toward `done` for progress accuracy.
+  const searchOneSite = async (s: typeof sites[number]): Promise<TorrentInfo[]> => {
+    const indexer = await getIndexer(s.domain);
+    if (!indexer) return [];
+    const perSiteMs = Math.min((s.timeout || 15) * 1000, 20_000);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutP = new Promise<TorrentInfo[]>((resolve) => {
+      timer = setTimeout(() => resolve([]), perSiteMs);
+    });
+    try {
+      return await Promise.race([indexer.search(q), timeoutP]);
+    } catch (e) {
+      console.warn(`[search] ${s.domain} failed`, (e as Error).message);
+      return [];
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  const searchAll = Promise.all(
     sites.map((s) =>
       limit(async () => {
-        const indexer = await getIndexer(s.domain);
-        let found = 0;
-        try {
-          const r = indexer ? await indexer.search(q) : [];
-          found = r.length;
-          done += 1;
-          onProgress?.({ current: done, total, site: s.name, found });
-          return r;
-        } catch (e) {
-          console.warn(`[search] ${s.domain} failed`, (e as Error).message);
-          done += 1;
-          onProgress?.({ current: done, total, site: s.name, found: 0 });
-          return [];
-        }
+        const r = await searchOneSite(s);
+        collected.push(...r);
+        done += 1;
+        onProgress?.({ current: done, total, site: s.name, found: r.length });
+        return r;
       })
     )
   );
-  return dedupAndSort(results.flat());
+
+  // Snapshot of currently collected results (deduped + sorted).
+  const finish = () => dedupAndSort([...collected]);
+  const timeoutPromise = new Promise<'timeout'>((resolve) =>
+    setTimeout(() => resolve('timeout'), timeoutMs)
+  );
+
+  // Race the full search against the timeout. Either way, return the current
+  // snapshot. Copy via spread so later background pushes don't mutate it.
+  await Promise.race([searchAll, timeoutPromise]);
+  return finish();
 }
