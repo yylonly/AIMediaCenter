@@ -132,7 +132,13 @@ export async function getHttpsAgent(
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
   const req = createRequire(import.meta.url);
-  const { HttpsProxyAgent } = req('https-proxy-agent') as {
+  // Non-literal specifier on purpose: webpack statically rewrites
+  // createRequire(...)('literal') into a bundled copy, and the bundled
+  // https-proxy-agent fails the CONNECT handshake (fast ECONNRESET).
+  // Loading through a variable forces a real runtime require, which
+  // resolves the actual v7 package from node_modules (verified working).
+  const pkg = 'https-proxy-agent';
+  const { HttpsProxyAgent } = req(pkg) as {
     HttpsProxyAgent: new (url: string) => unknown;
   };
   return new HttpsProxyAgent(cfg.url);
