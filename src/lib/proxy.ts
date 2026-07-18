@@ -120,9 +120,10 @@ export async function getDispatcher(
  * the CONNECT handshake properly. Returns undefined when the scope is off.
  *
  * Loads the CJS package via createRequire - webpack's module interop can't be
- * trusted for it (v5 assigns the named export inside an IIFE, invisible to
- * cjs-module-lexer), and https-proxy-agent is guaranteed present in
- * node_modules because axios depends on it.
+ * trusted for it (the named export is assigned in a way cjs-module-lexer can
+ * miss). Must be v7+: axios 1.x is incompatible with https-proxy-agent@5
+ * (socket disconnected before TLS), so it's pinned as a direct dependency
+ * instead of relying on axios's transitive v5.
  */
 export async function getHttpsAgent(
   scope: ProxyScope,
