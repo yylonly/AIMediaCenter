@@ -119,6 +119,26 @@ function dedupAndSort(flat: TorrentInfo[]): TorrentInfo[] {
 }
 
 /**
+ * Run an indexer search with one retry-on-empty. Proxies that rotate egress
+ * nodes per connection can intermittently return a cached/empty/error page
+ * on the first hit (fetchWithProxy already retries connection-level resets,
+ * but a 200 with an empty body looks successful and isn't retried). A second
+ * attempt usually lands on a different node and gets the real result.
+ *
+ * Network errors still propagate after the retry so callers can report them.
+ */
+export async function searchSite(
+  indexer: Indexer,
+  q: SearchQuery,
+  ctx?: SearchContext
+): Promise<TorrentInfo[]> {
+  const first = await indexer.search(q, ctx);
+  if (first.length > 0) return first;
+  // Empty: retry once to ride out proxy flakiness.
+  return indexer.search(q, ctx);
+}
+
+/**
  * Aggregate search across all active sites configured in DB.
  * Public sites use hard-coded indexers; private sites use NexusPHP.
  * Applies dedup (by title+size) and sorts by seeders desc.
@@ -132,8 +152,9 @@ export async function aggregatedSearch(q: SearchQuery): Promise<TorrentInfo[]> {
         const indexer = await getIndexer(s.domain);
         if (!indexer) return [];
         try {
-          // Pass the site's proxy preference so per-site toggles take effect.
-          return await indexer.search(q, { useProxy: s.proxy });
+          // searchSite retries once on empty results to ride out proxy
+          // flakiness; per-site proxy preference is passed through.
+          return await searchSite(indexer, q, { useProxy: s.proxy });
         } catch (e) {
           console.warn(`[search] ${s.domain} failed`, (e as Error).message);
           return [];
@@ -190,8 +211,9 @@ export async function aggregatedSearchStream(
       timer = setTimeout(() => resolve([]), perSiteMs);
     });
     try {
-      // Pass the site's proxy preference so per-site toggles take effect.
-      return await Promise.race([indexer.search(q, { useProxy: s.proxy }), timeoutP]);
+      // searchSite retries once on empty; the per-site timeout races against
+      // the whole thing so a slow retry can't stall the global search.
+      return await Promise.race([searchSite(indexer, q, { useProxy: s.proxy }), timeoutP]);
     } catch (e) {
       console.warn(`[search] ${s.domain} failed`, (e as Error).message);
       return [];

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
-import { getIndexer } from '@/core/indexer/registry';
+import { getIndexer, searchSite } from '@/core/indexer/registry';
 import { prisma } from '@/lib/prisma';
 
 export async function POST(req: NextRequest) {
@@ -17,10 +17,7 @@ export async function POST(req: NextRequest) {
   const site = await prisma.site.findUnique({ where: { domain } });
   const t0 = performance.now();
   try {
-    const results = await indexer.search(
-      { keyword: keyword || 'test', page: 1 },
-      { useProxy: site?.proxy ?? undefined }
-    );
+    const results = await searchSite(indexer, { keyword: keyword || 'test', page: 1 }, { useProxy: site?.proxy ?? undefined });
     const elapsed = Math.round(performance.now() - t0);
     return NextResponse.json({
       ok: true,

@@ -24,6 +24,13 @@ export const magnetdl: Indexer = {
     }, ctx?.useProxy);
     if (!res.ok) return [];
     const html = await res.text();
+    // Cloudflare challenge page - site is behind CF bot protection and
+    // blocks server-side scrapers. Nothing we can do without a headless
+    // browser; log so users investigating "0 results" see the real cause.
+    if (html.includes('Just a moment...') || html.includes('challenges.cloudflare.com')) {
+      console.warn('[magnetdl] blocked by Cloudflare challenge (403) - cannot scrape without a headless browser');
+      return [];
+    }
     const $ = cheerio.load(html);
     const out: TorrentInfo[] = [];
     $('table.download tbody tr').each((_, el) => {
