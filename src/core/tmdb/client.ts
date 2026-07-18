@@ -3,7 +3,7 @@
 import { MovieDb } from 'moviedb-promise';
 import { LRUCache } from 'lru-cache';
 import { prisma } from '@/lib/prisma';
-import { getHttpsAgent, resetProxyCache } from '@/lib/proxy';
+import { getHttpsAgent, resetProxyCache, withProxyRetry } from '@/lib/proxy';
 
 const cache = new LRUCache<string, any>({ max: 500, ttl: 60 * 60 * 1000 });
 
@@ -37,8 +37,11 @@ export async function getTmdb(): Promise<MovieDb | null> {
       if (agent) {
         const inner = tmdb as any;
         const orig = inner.makeRequest.bind(inner);
+        // withProxyRetry: proxy egress rotation sometimes lands on nodes
+        // whose IPs TMDB's CDN resets; a retry on a fresh connection (the
+        // agent runs with keepAlive off) usually lands on a working node.
         inner.makeRequest = (method: any, endpoint: any, params: any = {}, axiosConfig: any = {}) =>
-          orig(method, endpoint, params, { httpsAgent: agent, ...axiosConfig });
+          withProxyRetry(() => orig(method, endpoint, params, { httpsAgent: agent, ...axiosConfig }));
       }
       return tmdb;
     })();

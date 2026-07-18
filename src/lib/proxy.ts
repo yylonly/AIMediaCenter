@@ -161,6 +161,44 @@ function decompress(buf: Uint8Array, encoding: string | undefined): Uint8Array {
 }
 
 /**
+ * Connection-level errors worth retrying. Proxy software that rotates
+ * egress nodes per connection sometimes lands on a node whose IP is
+ * blocked by the destination CDN (TMDB is notorious for this) - the
+ * symptomatic reset is immediate, and a fresh connection usually works.
+ */
+function isRetriableConnError(e: unknown): boolean {
+  const msg = ((e as Error)?.message || '').toLowerCase();
+  return (
+    msg.includes('socket disconnected') ||
+    msg.includes('socket hang up') ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout') ||
+    msg.includes('econnrefused')
+  );
+}
+
+const MAX_PROXY_ATTEMPTS = 3;
+
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Run a proxied operation with retries on connection-level failures. */
+export async function withProxyRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_PROXY_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!isRetriableConnError(e) || attempt === MAX_PROXY_ATTEMPTS) throw e;
+      await sleep(150 * attempt);
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Minimal fetch replacement for proxied traffic, built on
  * node:http(s).request + https-proxy-agent (undici's ProxyAgent fails
  * against some proxies - see header). Follows redirects like fetch does,
@@ -274,7 +312,9 @@ export async function fetchWithProxy(
     const cfg = await loadProxyConfig();
     // `dispatcher` in init is an undici-only option; strip it for our path.
     const { dispatcher, ...rest } = init;
-    return proxiedFetch(url, rest, cfg.url);
+    // Retry: each attempt uses a fresh connection (keepAlive off), so a
+    // retry typically lands on a different egress node - see withProxyRetry.
+    return withProxyRetry(() => proxiedFetch(url, rest, cfg.url));
   }
   return fetch(url, init);
 }
