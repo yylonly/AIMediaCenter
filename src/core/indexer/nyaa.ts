@@ -1,6 +1,6 @@
 // Nyaa — public anime torrent site. Use RSS-style query.
 import * as cheerio from 'cheerio';
-import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import type { Indexer, SearchQuery, TorrentInfo, SearchContext } from './base';
 import { parseSize } from '@/lib/utils';
 import { fetchWithProxy } from '@/lib/proxy';
 
@@ -8,7 +8,7 @@ export const nyaa: Indexer = {
   domain: 'nyaa.si',
   name: 'Nyaa',
   url: 'https://nyaa.si',
-  async search(q: SearchQuery) {
+  async search(q: SearchQuery, ctx?: SearchContext) {
     const url = new URL('https://nyaa.si/');
     url.searchParams.set('q', q.keyword);
     url.searchParams.set('f', '0');
@@ -18,7 +18,7 @@ export const nyaa: Indexer = {
     if (q.page && q.page > 1) url.searchParams.set('p', String(q.page));
     const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
-    });
+    }, ctx?.useProxy);
     if (!res.ok) return [];
     const html = await res.text();
     const $ = cheerio.load(html);

@@ -91,7 +91,7 @@ export async function nexusphpSearch(site: Site, q: SearchQuery): Promise<Torren
   const res = await fetchWithProxy('ptSites', url.toString(), {
     headers,
     redirect: 'manual'
-  });
+  }, site.proxy);
   // Handle redirect to login page (typical when cookie expired)
   if (res.status >= 300 && res.status < 400) {
     const loc = res.headers.get('location') || '';
@@ -109,7 +109,7 @@ export async function nexusphpSearch(site: Site, q: SearchQuery): Promise<Torren
     if (/login|takelogin/i.test(loc)) {
       throw new Error('Cookie expired or not logged in');
     }
-    const r2 = await fetchWithProxy('ptSites', resolveUrl(loc, base), { headers });
+    const r2 = await fetchWithProxy('ptSites', resolveUrl(loc, base), { headers }, site.proxy);
     html = await r2.text();
   } else {
     html = await res.text();

@@ -2,7 +2,7 @@
 // https://mikanani.me
 // Uses RSS XML feed for search results (no seeders/peers in RSS).
 import * as cheerio from 'cheerio';
-import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import type { Indexer, SearchQuery, TorrentInfo, SearchContext } from './base';
 import { fetchWithProxy } from '@/lib/proxy';
 
 const BASE = 'https://mikanani.me';
@@ -13,11 +13,11 @@ export const mikan: Indexer = {
   domain: 'mikanani.me',
   name: 'Mikan',
   url: BASE,
-  async search(q: SearchQuery) {
+  async search(q: SearchQuery, ctx?: SearchContext) {
     const url = new URL(`${BASE}/RSS/Search`);
     url.searchParams.set('searchstr', q.keyword);
 
-    const res = await fetchWithProxy('publicSites', url.toString(), { headers: { 'User-Agent': UA } });
+    const res = await fetchWithProxy('publicSites', url.toString(), { headers: { 'User-Agent': UA } }, ctx?.useProxy);
     if (!res.ok) return [];
     const xml = await res.text();
     const $ = cheerio.load(xml, { xml: true });

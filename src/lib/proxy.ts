@@ -73,11 +73,31 @@ async function scopeEnabled(scope: ProxyScope): Promise<boolean> {
 }
 
 /**
+ * Decide whether a request should use the proxy, combining the scope switch
+ * with an optional per-site override.
+ *   - forceProxy === true:  always use proxy (per-site Site.proxy=true)
+ *   - forceProxy === false: never use proxy (per-site Site.proxy=false)
+ *   - forceProxy === undefined: fall back to the scope switch
+ */
+async function shouldProxy(scope: ProxyScope, forceProxy?: boolean): Promise<boolean> {
+  const cfg = await loadProxyConfig();
+  if (!cfg.enabled || !cfg.url) return false; // master switch off -> never
+  if (forceProxy === true) return true;
+  if (forceProxy === false) return false;
+  return cfg.scopes[scope] === true;
+}
+
+/**
  * Return an undici ProxyAgent for the given scope, or undefined if the scope
  * is not proxy-enabled. The agent is memoised per URL.
+ *
+ * forceProxy overrides the scope switch (see shouldProxy).
  */
-export async function getDispatcher(scope: ProxyScope): Promise<unknown | undefined> {
-  if (!(await scopeEnabled(scope))) return undefined;
+export async function getDispatcher(
+  scope: ProxyScope,
+  forceProxy?: boolean
+): Promise<unknown | undefined> {
+  if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
   if (cachedAgent && cachedAgentUrl === cfg.url) return cachedAgent;
   // Dynamic import: undici is Node-only and shouldn't be in the edge bundle.
@@ -93,9 +113,10 @@ export async function getDispatcher(scope: ProxyScope): Promise<unknown | undefi
  * Returns undefined when the scope is not proxy-enabled.
  */
 export async function getAxiosProxyConfig(
-  scope: ProxyScope
+  scope: ProxyScope,
+  forceProxy?: boolean
 ): Promise<{ host: string; port: number; protocol: string } | undefined> {
-  if (!(await scopeEnabled(scope))) return undefined;
+  if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
   try {
     const u = new URL(cfg.url);
@@ -111,15 +132,19 @@ export async function getAxiosProxyConfig(
 
 /**
  * fetch() wrapper that attaches the proxy dispatcher when the scope is
- * proxy-enabled, and passes through unchanged otherwise. The dispatcher key
- * is the undici-native way to override the global agent per request.
+ * proxy-enabled (or when forceProxy overrides it), and passes through
+ * unchanged otherwise. The dispatcher key is the undici-native way to
+ * override the global agent per request.
+ *
+ * forceProxy: per-site override (true=always proxy, false=never, undefined=scope default)
  */
 export async function fetchWithProxy(
   scope: ProxyScope,
   url: string,
-  init: RequestInit & { dispatcher?: unknown } = {}
+  init: RequestInit & { dispatcher?: unknown } = {},
+  forceProxy?: boolean
 ): Promise<Response> {
-  const dispatcher = await getDispatcher(scope);
+  const dispatcher = await getDispatcher(scope, forceProxy);
   // `dispatcher` is an undici option not in the lib.dom typings; cast through any.
   return fetch(url, { ...init, dispatcher } as any) as Promise<Response>;
 }

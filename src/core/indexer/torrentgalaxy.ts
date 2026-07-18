@@ -1,7 +1,7 @@
 // TorrentGalaxy — public torrent site. HTML scraping.
 // https://torrentgalaxy.one — list page → detail page → magnet
 import * as cheerio from 'cheerio';
-import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import type { Indexer, SearchQuery, TorrentInfo, SearchContext } from './base';
 import { parseSize } from '@/lib/utils';
 import { fetchWithProxy } from '@/lib/proxy';
 
@@ -11,14 +11,14 @@ export const torrentgalaxy: Indexer = {
   domain: 'torrentgalaxy.one',
   name: 'TorrentGalaxy',
   url: BASE,
-  async search(q: SearchQuery) {
+  async search(q: SearchQuery, ctx?: SearchContext) {
     const url = new URL(`${BASE}/get-posts/keywords:${encodeURIComponent(q.keyword)}`);
     const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
-    });
+    }, ctx?.useProxy);
     if (!res.ok) return [];
     const html = await res.text();
     const $ = cheerio.load(html);
@@ -63,9 +63,9 @@ export const torrentgalaxy: Indexer = {
           const dres = await fetchWithProxy('publicSites', detailUrl, {
             headers: {
               'User-Agent':
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
-          });
+          }, ctx?.useProxy);
           if (!dres.ok) return null;
           const dh = await dres.text();
           const $d = cheerio.load(dh);

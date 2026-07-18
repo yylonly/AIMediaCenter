@@ -34,6 +34,19 @@ export interface SearchQuery {
   sites?: string[];
 }
 
+/**
+ * Per-search context passed to Indexer.search. Currently only carries whether
+ * the calling site should go through the proxy (from Site.proxy), so each
+ * indexer can honour per-site proxy toggles instead of only the scope switch.
+ *
+ * useProxy === true  -> force proxy on for this site
+ * useProxy === false -> force proxy off for this site
+ * useProxy === undefined -> fall back to the scope switch in proxy config
+ */
+export interface SearchContext {
+  useProxy?: boolean;
+}
+
 export interface Indexer {
   /** Site domain, matches Site.domain */
   domain: string;
@@ -41,5 +54,5 @@ export interface Indexer {
   name: string;
   /** Site URL */
   url: string;
-  search(q: SearchQuery): Promise<TorrentInfo[]>;
+  search(q: SearchQuery, ctx?: SearchContext): Promise<TorrentInfo[]>;
 }

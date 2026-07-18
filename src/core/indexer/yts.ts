@@ -1,6 +1,6 @@
 // YTS — official JSON API for movies (public, no auth).
 // https://yts.gg/api/v2/list_movies.json?query_term=...
-import type { Indexer, TorrentInfo, SearchQuery } from './base';
+import type { Indexer, TorrentInfo, SearchQuery, SearchContext } from './base';
 import { fetchWithProxy } from '@/lib/proxy';
 
 const BASE = 'https://yts.gg';
@@ -9,7 +9,7 @@ export const yts: Indexer = {
   domain: 'yts.gg',
   name: 'YTS',
   url: BASE,
-  async search(q: SearchQuery) {
+  async search(q: SearchQuery, ctx?: SearchContext) {
     if (q.mtype === 'tv') return [];
     const url = new URL('https://yts.gg/api/v2/list_movies.json');
     url.searchParams.set('query_term', q.keyword);
@@ -17,7 +17,7 @@ export const yts: Indexer = {
     url.searchParams.set('limit', '30');
     const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
-    });
+    }, ctx?.useProxy);
     if (!res.ok) return [];
     const data = (await res.json()) as {
       data?: { movies?: Array<{

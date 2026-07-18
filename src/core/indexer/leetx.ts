@@ -1,7 +1,7 @@
 // 1337x — public torrent index (HTML scraping, requires 2-step fetch).
 // https://www.1337xx.to
 import * as cheerio from 'cheerio';
-import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import type { Indexer, SearchQuery, TorrentInfo, SearchContext } from './base';
 import { parseSize } from '@/lib/utils';
 import { fetchWithProxy } from '@/lib/proxy';
 
@@ -11,14 +11,14 @@ export const leetx: Indexer = {
   domain: '1337xx.to',
   name: '1337x',
   url: BASE,
-  async search(q: SearchQuery) {
+  async search(q: SearchQuery, ctx?: SearchContext) {
     const path = `/search/${encodeURIComponent(q.keyword)}/${q.page || 1}/`;
     const res = await fetchWithProxy('publicSites', BASE + path, {
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
-    });
+    }, ctx?.useProxy);
     if (!res.ok) return [];
     const html = await res.text();
     const $ = cheerio.load(html);
@@ -44,7 +44,7 @@ export const leetx: Indexer = {
         chunk.map(async (r) => {
           const detail = await fetchWithProxy('publicSites', BASE + r.page, {
             headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
-          });
+          }, ctx?.useProxy);
           if (!detail.ok) return null;
           const dh = await detail.text();
           const $d = cheerio.load(dh);

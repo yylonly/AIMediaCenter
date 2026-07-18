@@ -132,7 +132,8 @@ export async function aggregatedSearch(q: SearchQuery): Promise<TorrentInfo[]> {
         const indexer = await getIndexer(s.domain);
         if (!indexer) return [];
         try {
-          return await indexer.search(q);
+          // Pass the site's proxy preference so per-site toggles take effect.
+          return await indexer.search(q, { useProxy: s.proxy });
         } catch (e) {
           console.warn(`[search] ${s.domain} failed`, (e as Error).message);
           return [];
@@ -189,7 +190,8 @@ export async function aggregatedSearchStream(
       timer = setTimeout(() => resolve([]), perSiteMs);
     });
     try {
-      return await Promise.race([indexer.search(q), timeoutP]);
+      // Pass the site's proxy preference so per-site toggles take effect.
+      return await Promise.race([indexer.search(q, { useProxy: s.proxy }), timeoutP]);
     } catch (e) {
       console.warn(`[search] ${s.domain} failed`, (e as Error).message);
       return [];

@@ -118,6 +118,13 @@ export default function SettingsPage() {
     }
   }
 
+  async function testProxy() {
+    const r = await fetch('/api/proxy/test', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) toast.success(`代理连通正常（${d.status}，${d.ms}ms）`);
+    else toast.error(d.error || `代理连接失败（${d.ms || '?'}ms）`);
+  }
+
   // Backup / restore
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -268,8 +275,11 @@ export default function SettingsPage() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            qBittorrent 与 Jellyfin（内网）始终直连，不受代理影响。保存后立即生效。
+            qBittorrent 与 Jellyfin（内网）始终直连，不受代理影响。保存后立即生效。公开站点和 PT 站点可在站点管理页按站点单独开关代理（复选框"代理"）。
           </p>
+          <div className="text-right">
+            <Button variant="outline" size="sm" onClick={testProxy}>测试代理</Button>
+          </div>
         </CardContent>
       </Card>
 

@@ -1,7 +1,7 @@
 // DMHY (动漫花园) — Chinese anime torrent site. HTML scraping.
 // https://share.dmhy.org
 import * as cheerio from 'cheerio';
-import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import type { Indexer, SearchQuery, TorrentInfo, SearchContext } from './base';
 import { parseSize } from '@/lib/utils';
 import { fetchWithProxy } from '@/lib/proxy';
 
@@ -11,16 +11,16 @@ export const dmhy: Indexer = {
   domain: 'share.dmhy.org',
   name: 'DMHY',
   url: BASE,
-  async search(q: SearchQuery) {
+  async search(q: SearchQuery, ctx?: SearchContext) {
     const url = new URL(`${BASE}/topics/list`);
     url.searchParams.set('keyword', q.keyword);
 
     const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
-    });
+    }, ctx?.useProxy);
     if (!res.ok) return [];
     const html = await res.text();
     const $ = cheerio.load(html);
