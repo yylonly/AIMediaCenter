@@ -147,7 +147,7 @@ function toBodyBuffer(body: unknown): Buffer | null {
 }
 
 /** Decompress according to content-encoding (fetch does this implicitly). */
-function decompress(buf: Uint8Array, encoding: string | undefined): Buffer {
+function decompress(buf: Uint8Array, encoding: string | undefined): Uint8Array {
   switch ((encoding || '').toLowerCase()) {
     case 'gzip':
       return gunzipSync(buf);
@@ -222,7 +222,7 @@ async function proxiedFetch(
             );
             return;
           }
-          let buf = Buffer.concat(chunks);
+          let buf: Uint8Array = Buffer.concat(chunks);
           buf = decompress(buf, res.headers['content-encoding'] as string | undefined);
           const outHeaders = new Headers();
           for (const [k, v] of Object.entries(res.headers)) {
