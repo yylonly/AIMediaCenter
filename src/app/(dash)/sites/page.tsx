@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog } from '@/components/ui/dialog';
-import { Play, RefreshCcw, Plus, Trash2, Globe, Lock, LogIn } from 'lucide-react';
+import { Play, RefreshCcw, Plus, Trash2, Globe, Lock, LogIn, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 interface Site {
   id: number;
@@ -76,6 +76,15 @@ export default function SitesPage() {
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [testResults, setTestResults] = useState<Record<string, TestResult>>(() => loadResults());
 
+  // Progress dialog state for testAll / single test
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [progress, setProgress] = useState<{
+    current: number;       // 1-based index of the site currently being tested
+    total: number;
+    currentName: string;
+    done: { name: string; ok: boolean; detail: string }[];
+  }>({ current: 0, total: 0, currentName: '', done: [] });
+
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Site | null>(null);
@@ -137,24 +146,49 @@ export default function SitesPage() {
       const result: TestResult = await r.json();
       updateResults({ [s.domain]: result });
       if (result.ok) {
-        toast.success(`${s.name} 测试通过 — ${result.results} 条结果 (${result.elapsed}ms)`);
+        toast.success(`${s.name} 测试通过 - ${result.results} 条结果 (${result.elapsed}ms)`);
       } else {
         toast.error(`${s.name} 测试失败：${result.error}`);
       }
+      return result;
     } catch (e) {
-      updateResults({
-        [s.domain]: { domain: s.domain, ok: false, error: (e as Error).message }
-      });
+      const err = { domain: s.domain, ok: false, error: (e as Error).message };
+      updateResults({ [s.domain]: err });
       toast.error(`${s.name} 请求失败`);
+      return err as TestResult;
     } finally {
       setTesting((prev) => ({ ...prev, [s.domain]: false }));
     }
   }, [updateResults]);
 
-  const testAll = useCallback(async () => {
-    for (const s of items) {
-      await testSite(s);
+  // Run testSite for a list of sites with a live progress dialog.
+  async function runWithProgress(sites: Site[]) {
+    if (sites.length === 0) return;
+    setProgress({ current: 0, total: sites.length, currentName: '', done: [] });
+    setProgressOpen(true);
+    for (let i = 0; i < sites.length; i++) {
+      const s = sites[i];
+      setProgress((p) => ({ ...p, current: i + 1, currentName: s.name }));
+      const result = await testSite(s);
+      setProgress((p) => ({
+        ...p,
+        done: [
+          ...p.done,
+          {
+            name: s.name,
+            ok: !!result.ok,
+            detail: result.ok
+              ? `${(result as any).results ?? 0} 条 (${(result as any).elapsed ?? 0}ms)`
+              : result.error || '失败'
+          }
+        ]
+      }));
     }
+    setProgress((p) => ({ ...p, current: p.total, currentName: '' }));
+  }
+
+  const testAll = useCallback(async () => {
+    await runWithProgress(items);
   }, [items, testSite]);
 
   // ---- Form handlers ----
@@ -461,7 +495,7 @@ export default function SitesPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => testSite(s)}
+                      onClick={() => runWithProgress([s])}
                       disabled={testing[s.domain]}
                     >
                       <Play className="mr-1 h-3 w-3" />
@@ -767,6 +801,74 @@ export default function SitesPage() {
               disabled={captchaSubmitting || !captchaText.trim()}
             >
               {captchaSubmitting ? '登录中…' : '确认登录'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Test progress dialog */}
+      <Dialog
+        open={progressOpen}
+        onClose={() => setProgressOpen(false)}
+        title="站点测试"
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          {/* Progress bar */}
+          <div>
+            <div className="flex justify-between text-xs text-muted-foreground mb-1">
+              <span>
+                {progress.current < progress.total && progress.currentName
+                  ? `测试中：${progress.currentName}（${progress.current}/${progress.total}）`
+                  : `已完成 ${progress.done.length}/${progress.total}`}
+              </span>
+              {progress.total > 0 && (
+                <span>{Math.round((progress.done.length / progress.total) * 100)}%</span>
+              )}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${progress.total > 0 ? (progress.done.length / progress.total) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Current site being tested */}
+          {progress.current < progress.total && progress.currentName && (
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>正在测试 {progress.currentName}…</span>
+            </div>
+          )}
+
+          {/* Results list */}
+          {progress.done.length > 0 && (
+            <div className="max-h-64 space-y-1 overflow-auto">
+              {progress.done.map((d, i) => (
+                <div key={i} className="flex items-start gap-2 text-sm">
+                  {d.ok ? (
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+                  ) : (
+                    <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                  )}
+                  <span className="font-medium">{d.name}</span>
+                  <span className={`truncate text-xs ${d.ok ? 'text-muted-foreground' : 'text-red-500'}`} title={d.detail}>
+                    {d.detail}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setProgressOpen(false)}
+              disabled={progress.current > 0 && progress.current < progress.total}
+            >
+              {progress.current > 0 && progress.current < progress.total ? '测试中…' : '关闭'}
             </Button>
           </div>
         </div>
