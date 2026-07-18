@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
 import { getIndexer } from '@/core/indexer/registry';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
@@ -9,9 +10,17 @@ export async function POST(req: NextRequest) {
   if (!domain) return NextResponse.json({ error: 'domain required' }, { status: 400 });
   const indexer = await getIndexer(domain);
   if (!indexer) return NextResponse.json({ error: `unknown site: ${domain}` }, { status: 404 });
+  // Mirror aggregatedSearch: honour each site's per-site proxy flag so the
+  // test exercises the same network path real searches use. Without this a
+  // site marked proxy=true but with the global publicSites scope off would
+  // appear to fail (direct connection to a blocked host) when searches work.
+  const site = await prisma.site.findUnique({ where: { domain } });
   const t0 = performance.now();
   try {
-    const results = await indexer.search({ keyword: keyword || 'test', page: 1 });
+    const results = await indexer.search(
+      { keyword: keyword || 'test', page: 1 },
+      { useProxy: site?.proxy ?? undefined }
+    );
     const elapsed = Math.round(performance.now() - t0);
     return NextResponse.json({
       ok: true,
