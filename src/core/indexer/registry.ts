@@ -1,7 +1,7 @@
 // Multi-site aggregated search - the "search chain" from MoviePilot.
 import pLimit from 'p-limit';
 import { prisma } from '@/lib/prisma';
-import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import type { Indexer, SearchQuery, SearchContext, TorrentInfo } from './base';
 import { yts } from './yts';
 import { nyaa } from './nyaa';
 import { leetx } from './leetx';
