@@ -113,6 +113,9 @@ export async function getDispatcher(
  * option breaks HTTPS-over-HTTP-proxy with ECONNRESET against some proxy
  * software (Surge/ClashX), so we must use https-proxy-agent which handles
  * the CONNECT handshake properly. Returns undefined when the scope is off.
+ *
+ * Uses createRequire to load the CJS package - `await import()` returns the
+ * module namespace where the constructor isn't callable in bundled output.
  */
 export async function getHttpsAgent(
   scope: ProxyScope,
@@ -120,7 +123,9 @@ export async function getHttpsAgent(
 ): Promise<unknown | undefined> {
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
-  const { HttpsProxyAgent } = await import('https-proxy-agent');
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const { HttpsProxyAgent } = req('https-proxy-agent');
   return new HttpsProxyAgent(cfg.url);
 }
 
