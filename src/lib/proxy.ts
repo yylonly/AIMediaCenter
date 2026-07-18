@@ -177,7 +177,7 @@ function isRetriableConnError(e: unknown): boolean {
   );
 }
 
-const MAX_PROXY_ATTEMPTS = 3;
+const MAX_PROXY_ATTEMPTS = 5;
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -192,7 +192,9 @@ export async function withProxyRetry<T>(fn: () => Promise<T>): Promise<T> {
     } catch (e) {
       lastErr = e;
       if (!isRetriableConnError(e) || attempt === MAX_PROXY_ATTEMPTS) throw e;
-      await sleep(150 * attempt);
+      // Exponential backoff (200/400/800/1600ms): bad egress windows last
+      // seconds, so spread attempts over ~3s to escape the rotation window.
+      await sleep(200 * Math.pow(2, attempt - 1));
     }
   }
   throw lastErr;
