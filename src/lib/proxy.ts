@@ -222,7 +222,9 @@ async function proxiedFetch(
             );
             return;
           }
-          let buf: Uint8Array = Buffer.concat(chunks);
+          // `any`: Buffer/Uint8Array generic variance (@types/node + TS5.7)
+          // makes every precise annotation here a compile error whack-a-mole.
+          let buf: any = Buffer.concat(chunks);
           buf = decompress(buf, res.headers['content-encoding'] as string | undefined);
           const outHeaders = new Headers();
           for (const [k, v] of Object.entries(res.headers)) {
