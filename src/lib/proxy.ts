@@ -15,11 +15,10 @@
 //
 // NOTE on imports: dynamic `await import()` is unreliable inside Next.js
 // server bundles (webpack's namespace interop can strip constructors, and
-// node: builtins lose their exports). We therefore use static imports here;
-// for the CJS-only https-proxy-agent we go through createRequire, which
-// resolves the real package from node_modules at runtime.
+// node: builtins lose their exports). Static imports are used where possible;
+// https-proxy-agent goes through process.getBuiltinModule('module') —
+// see getHttpsAgent for why plain createRequire can't be used either.
 import { prisma } from '@/lib/prisma';
-import { createRequire } from 'node:module';
 import { ProxyAgent } from 'undici';
 
 export type ProxyScope = 'tmdb' | 'douban' | 'publicSites' | 'ptSites';
@@ -131,14 +130,18 @@ export async function getHttpsAgent(
 ): Promise<unknown | undefined> {
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
-  const req = createRequire(import.meta.url);
-  // Non-literal specifier on purpose: webpack statically rewrites
-  // createRequire(...)('literal') into a bundled copy, and the bundled
-  // https-proxy-agent fails the CONNECT handshake (fast ECONNRESET).
-  // Loading through a variable forces a real runtime require, which
-  // resolves the actual v7 package from node_modules (verified working).
-  const pkg = 'https-proxy-agent';
-  const { HttpsProxyAgent } = req(pkg) as {
+  // webpack rewrites any syntactically recognisable
+  // `createRequire(import.meta.url)(...)` into its own module loader —
+  // with a literal specifier it bundles a copy (which fails the proxy
+  // CONNECT handshake), with a variable it throws MODULE_NOT_FOUND.
+  // process.getBuiltinModule (Node >= 20.16) returns the REAL 'module'
+  // builtin, invisible to webpack's parser, so we get a genuine runtime
+  // require that resolves the real v7 package from node_modules.
+  const { createRequire } = (process as any).getBuiltinModule(
+    'module'
+  ) as typeof import('node:module');
+  const req = createRequire(process.cwd() + '/package.json');
+  const { HttpsProxyAgent } = req('https-proxy-agent') as {
     HttpsProxyAgent: new (url: string) => unknown;
   };
   return new HttpsProxyAgent(cfg.url);
