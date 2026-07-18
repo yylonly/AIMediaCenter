@@ -21,6 +21,7 @@ export const leetx: Indexer = {
     }, ctx?.useProxy);
     if (!res.ok) return [];
     const html = await res.text();
+    console.log('[leetx] html len', html.length, 'head', html.slice(0, 200));
     const $ = cheerio.load(html);
     const rows: Array<{ title: string; page: string; size: number; seeders: number; peers: number }> = [];
     $('table.table-list tbody tr').each((_, el) => {
