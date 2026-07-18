@@ -468,15 +468,13 @@ export default function SitesPage() {
                       测试
                     </Button>
                     {!isPublic && (
-                      <>
-                        <Button size="sm" variant="outline" onClick={() => openEdit(s)}>
-                          编辑
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => deleteSite(s)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </>
+                      <Button size="sm" variant="outline" onClick={() => deleteSite(s)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     )}
+                    <Button size="sm" variant="outline" onClick={() => openEdit(s)}>
+                      编辑
+                    </Button>
                   </div>
                 </Td>
               </Tr>
