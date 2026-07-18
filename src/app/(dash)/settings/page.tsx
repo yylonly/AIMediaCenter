@@ -17,6 +17,7 @@ interface Cfg {
   proxy: {
     enabled: boolean;
     url: string;
+    global: boolean;
     scopes: { tmdb: boolean; douban: boolean; publicSites: boolean; ptSites: boolean };
   };
 }
@@ -30,6 +31,7 @@ const EMPTY: Cfg = {
   proxy: {
     enabled: false,
     url: '',
+    global: false,
     scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false }
   }
 };
@@ -50,7 +52,9 @@ export default function SettingsPage() {
         return r.json();
       })
       .then((d) => {
-        setCfg({ ...EMPTY, ...d });
+        // Deep-merge proxy so configs saved before new fields existed still
+        // pick up the defaults (e.g. `global` added later).
+        setCfg({ ...EMPTY, ...d, proxy: { ...EMPTY.proxy, ...(d.proxy || {}) } });
         setLoadError(null);
       })
       .catch((e) => {
@@ -251,8 +255,20 @@ export default function SettingsPage() {
             />
           )}
           <div className="grid grid-cols-3 items-center gap-3">
+            <label className="text-sm text-muted-foreground">全局生效</label>
+            <div className="col-span-2 flex items-center gap-2 pt-1">
+              <Checkbox
+                checked={cfg.proxy.global}
+                onCheckedChange={(v) => setCfg({ ...cfg, proxy: { ...cfg.proxy, global: !!v } })}
+              />
+              <span className="text-sm text-muted-foreground">
+                所有外网请求（TMDB/豆瓣/公开站点/PT 站点）都走代理，忽略下方单项开关
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 items-center gap-3">
             <label className="text-sm text-muted-foreground">生效范围</label>
-            <div className="col-span-2 flex flex-wrap gap-4 pt-1 text-sm">
+            <div className={`col-span-2 flex flex-wrap gap-4 pt-1 text-sm ${cfg.proxy.global ? 'pointer-events-none opacity-40' : ''}`}>
               {([
                 ['tmdb', 'TMDB'],
                 ['douban', '豆瓣'],
@@ -261,7 +277,8 @@ export default function SettingsPage() {
               ] as const).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2">
                   <Checkbox
-                    checked={cfg.proxy.scopes[key]}
+                    checked={cfg.proxy.global || cfg.proxy.scopes[key]}
+                    disabled={cfg.proxy.global}
                     onCheckedChange={(v) =>
                       setCfg({
                         ...cfg,

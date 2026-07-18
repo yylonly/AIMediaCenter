@@ -29,6 +29,8 @@ export type ProxyScope = 'tmdb' | 'douban' | 'publicSites' | 'ptSites';
 export interface ProxyConfig {
   enabled: boolean;
   url: string; // e.g. http://192.168.124.1:7890
+  /** When true, every scope proxies regardless of the per-scope switches. */
+  global: boolean;
   scopes: {
     tmdb: boolean;
     douban: boolean;
@@ -40,6 +42,7 @@ export interface ProxyConfig {
 const DEFAULT_CONFIG: ProxyConfig = {
   enabled: false,
   url: '',
+  global: false,
   scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false }
 };
 
@@ -58,6 +61,7 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
     cachedConfig = {
       enabled: !!v.enabled,
       url: v.url || '',
+      global: !!v.global,
       scopes: {
         tmdb: !!v.scopes?.tmdb,
         douban: !!v.scopes?.douban,
@@ -72,17 +76,18 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
 }
 
 /**
- * Decide whether a request should use the proxy, combining the scope switch
- * with an optional per-site override.
+ * Decide whether a request should use the proxy, combining the global /
+ * scope switches with an optional per-site override.
  *   - forceProxy === true:  always use proxy (per-site Site.proxy=true)
  *   - forceProxy === false: never use proxy (per-site Site.proxy=false)
- *   - forceProxy === undefined: fall back to the scope switch
+ *   - forceProxy === undefined: global switch, then the scope switch
  */
 async function shouldProxy(scope: ProxyScope, forceProxy?: boolean): Promise<boolean> {
   const cfg = await loadProxyConfig();
   if (!cfg.enabled || !cfg.url) return false; // master switch off -> never
   if (forceProxy === true) return true;
   if (forceProxy === false) return false;
+  if (cfg.global) return true;
   return cfg.scopes[scope] === true;
 }
 
@@ -142,7 +147,7 @@ function toBodyBuffer(body: unknown): Buffer | null {
 }
 
 /** Decompress according to content-encoding (fetch does this implicitly). */
-function decompress(buf: Buffer, encoding: string | undefined): Buffer {
+function decompress(buf: Uint8Array, encoding: string | undefined): Buffer {
   switch ((encoding || '').toLowerCase()) {
     case 'gzip':
       return gunzipSync(buf);
