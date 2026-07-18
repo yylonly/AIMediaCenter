@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
-import { loadProxyConfig } from '@/lib/proxy';
+import { loadProxyConfig, fetchWithProxy } from '@/lib/proxy';
 
 /**
  * Test the configured proxy by fetching a well-known URL through it.
  * Uses google generate_204 as the default target (reachable only when the
- * proxy actually routes traffic out). Returns ok + latency + status.
+ * proxy actually routes traffic out). Goes through the same code path as
+ * real proxied traffic (fetchWithProxy with forceProxy) so the result
+ * reflects what modules will actually experience.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
@@ -21,10 +23,7 @@ export async function POST(req: NextRequest) {
 
   const t0 = Date.now();
   try {
-    // undici ProxyAgent - dynamic import keeps it Node-only.
-    const { ProxyAgent } = await import('undici');
-    const dispatcher = new ProxyAgent({ uri: cfg.url });
-    const res = await fetch(target, { dispatcher } as any);
+    const res = await fetchWithProxy('tmdb', target, {}, true);
     const ms = Date.now() - t0;
     return NextResponse.json({
       ok: res.status >= 200 && res.status < 400,

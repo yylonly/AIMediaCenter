@@ -4,22 +4,25 @@
 // ptSites) can be toggled independently. qBittorrent & Jellyfin are always
 // direct (they live on the LAN). The config is stored in SystemConfig.proxy.
 //
-// Two injection paths:
-//   - Native fetch (undici): pass `dispatcher` in the fetch options. Use
-//     `fetchWithProxy(scope, url, init)` to do this automatically.
-//   - axios (moviedb-promise): pass `httpsAgent`. Use `getHttpsAgent(scope)`.
-//
-// A global EnvHttpProxyAgent is also set in instrumentation.ts as a fallback
-// for any fetch that isn't explicitly wrapped; NO_PROXY keeps LAN traffic
-// direct.
-//
-// NOTE on imports: dynamic `await import()` is unreliable inside Next.js
-// server bundles (webpack's namespace interop can strip constructors, and
-// node: builtins lose their exports). Static imports are used where possible;
-// https-proxy-agent goes through process.getBuiltinModule('module') —
-// see getHttpsAgent for why plain createRequire can't be used either.
+// Implementation notes (hard-won, do not simplify without re-testing):
+//   - undici's ProxyAgent fails CONNECT against some proxy software (Surge)
+//     with an instant ECONNRESET, so native fetch + `dispatcher` is NOT used
+//     for proxied traffic. Instead, proxied requests go through
+//     https-proxy-agent@7 + node:http(s).request (verified working).
+//   - https-proxy-agent must be the REAL package from node_modules: webpack
+//     breaks it when bundling (CONNECT handshake fails), and it hijacks any
+//     recognisable `createRequire(import.meta.url)(...)` call. We therefore
+//     obtain a genuine runtime require via process.getBuiltinModule('module')
+//     (Node >= 20.16), which webpack's parser cannot see.
+//   - keepAlive is disabled on the agent: reused CONNECT tunnels go stale on
+//     some proxies and produce intermittent ECONNRESET on the next request.
+//   - axios (moviedb-promise) gets the agent by patching the constructed
+//     MovieDb instance (see tmdb/client.ts) because webpack bundles a
+//     separate axios copy per chunk, so interceptors/defaults don't reach it.
 import { prisma } from '@/lib/prisma';
-import { ProxyAgent } from 'undici';
+import { request as httpsRequest } from 'node:https';
+import { request as httpRequest } from 'node:http';
+import { gunzipSync, inflateSync, brotliDecompressSync } from 'node:zlib';
 
 export type ProxyScope = 'tmdb' | 'douban' | 'publicSites' | 'ptSites';
 
@@ -41,9 +44,6 @@ const DEFAULT_CONFIG: ProxyConfig = {
 };
 
 let cachedConfig: ProxyConfig | null = null;
-// The undici ProxyAgent is lazily created and memoised per proxy URL.
-let cachedAgent: ProxyAgent | null = null;
-let cachedAgentUrl = '';
 
 /** Load proxy config from DB (cached, TTL-free - invalidate via resetProxyCache). */
 export async function loadProxyConfig(): Promise<ProxyConfig> {
@@ -71,13 +71,6 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
   return cachedConfig;
 }
 
-/** Whether a given scope should go through the proxy right now. */
-async function scopeEnabled(scope: ProxyScope): Promise<boolean> {
-  const cfg = await loadProxyConfig();
-  if (!cfg.enabled || !cfg.url) return false;
-  return cfg.scopes[scope] === true;
-}
-
 /**
  * Decide whether a request should use the proxy, combining the scope switch
  * with an optional per-site override.
@@ -93,36 +86,31 @@ async function shouldProxy(scope: ProxyScope, forceProxy?: boolean): Promise<boo
   return cfg.scopes[scope] === true;
 }
 
+type HpaCtor = new (url: string, opts?: Record<string, unknown>) => unknown;
+
+let cachedHpaCtor: HpaCtor | null = null;
+
 /**
- * Return an undici ProxyAgent for the given scope, or undefined if the scope
- * is not proxy-enabled. The agent is memoised per URL.
- *
- * forceProxy overrides the scope switch (see shouldProxy).
+ * Load the real https-proxy-agent constructor from node_modules.
+ * See the file header for why process.getBuiltinModule is required -
+ * every webpack-visible path (static import, dynamic import, createRequire
+ * with literal or variable specifier) ends up with a broken or missing copy.
  */
-export async function getDispatcher(
-  scope: ProxyScope,
-  forceProxy?: boolean
-): Promise<ProxyAgent | undefined> {
-  if (!(await shouldProxy(scope, forceProxy))) return undefined;
-  const cfg = await loadProxyConfig();
-  if (cachedAgent && cachedAgentUrl === cfg.url) return cachedAgent;
-  cachedAgent = new ProxyAgent({ uri: cfg.url });
-  cachedAgentUrl = cfg.url;
-  return cachedAgent;
+function loadHpaCtor(): HpaCtor {
+  if (cachedHpaCtor) return cachedHpaCtor;
+  const { createRequire } = (process as any).getBuiltinModule(
+    'module'
+  ) as typeof import('node:module');
+  const req = createRequire(process.cwd() + '/package.json');
+  const { HttpsProxyAgent } = req('https-proxy-agent') as { HttpsProxyAgent: HpaCtor };
+  cachedHpaCtor = HttpsProxyAgent;
+  return HttpsProxyAgent;
 }
 
 /**
- * Return an https.Agent (HttpsProxyAgent) configured to route through the
- * proxy, for axios-based clients (moviedb-promise). axios's built-in `proxy`
- * option breaks HTTPS-over-HTTP-proxy with ECONNRESET against some proxy
- * software (Surge/ClashX), so we must use https-proxy-agent which handles
- * the CONNECT handshake properly. Returns undefined when the scope is off.
- *
- * Loads the CJS package via createRequire - webpack's module interop can't be
- * trusted for it (the named export is assigned in a way cjs-module-lexer can
- * miss). Must be v7+: axios 1.x is incompatible with https-proxy-agent@5
- * (socket disconnected before TLS), so it's pinned as a direct dependency
- * instead of relying on axios's transitive v5.
+ * Return an agent that routes HTTPS traffic through the proxy via
+ * https-proxy-agent@7, for axios-based clients (moviedb-promise).
+ * Returns undefined when the scope is off. keepAlive stays off - see header.
  */
 export async function getHttpsAgent(
   scope: ProxyScope,
@@ -130,28 +118,142 @@ export async function getHttpsAgent(
 ): Promise<unknown | undefined> {
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
-  // webpack rewrites any syntactically recognisable
-  // `createRequire(import.meta.url)(...)` into its own module loader —
-  // with a literal specifier it bundles a copy (which fails the proxy
-  // CONNECT handshake), with a variable it throws MODULE_NOT_FOUND.
-  // process.getBuiltinModule (Node >= 20.16) returns the REAL 'module'
-  // builtin, invisible to webpack's parser, so we get a genuine runtime
-  // require that resolves the real v7 package from node_modules.
-  const { createRequire } = (process as any).getBuiltinModule(
-    'module'
-  ) as typeof import('node:module');
-  const req = createRequire(process.cwd() + '/package.json');
-  const { HttpsProxyAgent } = req('https-proxy-agent') as {
-    HttpsProxyAgent: new (url: string) => unknown;
-  };
-  return new HttpsProxyAgent(cfg.url);
+  const HttpsProxyAgent = loadHpaCtor();
+  return new HttpsProxyAgent(cfg.url, { keepAlive: false });
+}
+
+/** Normalise fetch-style headers into a plain object. */
+function toHeaderObject(init?: HeadersInit): Record<string, string> {
+  const out: Record<string, string> = {};
+  new Headers(init).forEach((v, k) => {
+    out[k] = v;
+  });
+  return out;
+}
+
+/** Convert the subset of BodyInit our call sites use into a Buffer. */
+function toBodyBuffer(body: unknown): Buffer | null {
+  if (body == null) return null;
+  if (typeof body === 'string') return Buffer.from(body);
+  if (body instanceof URLSearchParams) return Buffer.from(body.toString());
+  if (body instanceof ArrayBuffer) return Buffer.from(body);
+  if (ArrayBuffer.isView(body)) return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  throw new Error('unsupported body type for proxied fetch');
+}
+
+/** Decompress according to content-encoding (fetch does this implicitly). */
+function decompress(buf: Buffer, encoding: string | undefined): Buffer {
+  switch ((encoding || '').toLowerCase()) {
+    case 'gzip':
+      return gunzipSync(buf);
+    case 'deflate':
+      return inflateSync(buf);
+    case 'br':
+      return brotliDecompressSync(buf);
+    default:
+      return buf;
+  }
 }
 
 /**
- * fetch() wrapper that attaches the proxy dispatcher when the scope is
- * proxy-enabled (or when forceProxy overrides it), and passes through
- * unchanged otherwise. The dispatcher key is the undici-native way to
- * override the global agent per request.
+ * Minimal fetch replacement for proxied traffic, built on
+ * node:http(s).request + https-proxy-agent (undici's ProxyAgent fails
+ * against some proxies - see header). Follows redirects like fetch does,
+ * transparently decompresses, and returns a real Response object.
+ */
+async function proxiedFetch(
+  targetUrl: string,
+  init: RequestInit,
+  proxyUrl: string,
+  redirects = 0
+): Promise<Response> {
+  const u = new URL(targetUrl);
+  const isHttps = u.protocol === 'https:';
+  const method = (init.method || 'GET').toUpperCase();
+  const headers = toHeaderObject(init.headers);
+  const body = toBodyBuffer(init.body);
+
+  let options: Record<string, unknown>;
+  if (isHttps) {
+    // CONNECT tunnel via https-proxy-agent (keepAlive off, see header).
+    const HttpsProxyAgent = loadHpaCtor();
+    options = { method, headers, agent: new HttpsProxyAgent(proxyUrl, { keepAlive: false }) };
+  } else {
+    // Plain HTTP targets use the absolute-URI form against the proxy.
+    const p = new URL(proxyUrl);
+    headers['host'] = u.host;
+    if (p.username) {
+      headers['proxy-authorization'] =
+        'Basic ' + Buffer.from(`${decodeURIComponent(p.username)}:${decodeURIComponent(p.password)}`).toString('base64');
+    }
+    options = {
+      host: p.hostname,
+      port: p.port || 80,
+      path: u.toString(),
+      method,
+      headers
+    };
+  }
+
+  return new Promise<Response>((resolve, reject) => {
+    const handler = (res: import('node:http').IncomingMessage) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const status = res.statusCode || 200;
+          // Follow redirects the way fetch does (303 downgrades to GET).
+          const location = res.headers.location as string | undefined;
+          if ([301, 302, 303, 307, 308].includes(status) && location && redirects < 5) {
+            const next = new URL(location, u).toString();
+            const downgrade = status === 303 || ((status === 301 || status === 302) && method !== 'GET' && method !== 'HEAD');
+            resolve(
+              proxiedFetch(
+                next,
+                downgrade ? { headers: init.headers } : init,
+                proxyUrl,
+                redirects + 1
+              )
+            );
+            return;
+          }
+          let buf = Buffer.concat(chunks);
+          buf = decompress(buf, res.headers['content-encoding'] as string | undefined);
+          const outHeaders = new Headers();
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (v == null) continue;
+            if (['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(k)) continue;
+            if (Array.isArray(v)) v.forEach((item) => outHeaders.append(k, item));
+            else outHeaders.set(k, String(v));
+          }
+          const nullBody = status === 204 || status === 304 || method === 'HEAD';
+          resolve(
+            new Response(nullBody ? null : buf, {
+              status,
+              statusText: res.statusMessage || '',
+              headers: outHeaders
+            })
+          );
+        } catch (e) {
+          reject(e);
+        }
+      });
+      res.on('error', reject);
+    };
+    const req = isHttps
+      ? httpsRequest(u, options as any, handler)
+      : httpRequest(options as any, handler);
+    req.setTimeout(30000, () => req.destroy(new Error('proxy request timeout (30s)')));
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * fetch() replacement that routes through the proxy when the scope is
+ * proxy-enabled (or forceProxy overrides it), and passes through to native
+ * fetch unchanged otherwise.
  *
  * forceProxy: per-site override (true=always proxy, false=never, undefined=scope default)
  */
@@ -161,14 +263,16 @@ export async function fetchWithProxy(
   init: RequestInit & { dispatcher?: unknown } = {},
   forceProxy?: boolean
 ): Promise<Response> {
-  const dispatcher = await getDispatcher(scope, forceProxy);
-  // `dispatcher` is an undici option not in the lib.dom typings; cast through any.
-  return fetch(url, { ...init, dispatcher } as any) as Promise<Response>;
+  if (await shouldProxy(scope, forceProxy)) {
+    const cfg = await loadProxyConfig();
+    // `dispatcher` in init is an undici-only option; strip it for our path.
+    const { dispatcher, ...rest } = init;
+    return proxiedFetch(url, rest, cfg.url);
+  }
+  return fetch(url, init);
 }
 
-/** Invalidate the cached config & agent (call after settings are saved). */
+/** Invalidate the cached config (call after settings are saved). */
 export function resetProxyCache() {
   cachedConfig = null;
-  cachedAgent = null;
-  cachedAgentUrl = '';
 }
