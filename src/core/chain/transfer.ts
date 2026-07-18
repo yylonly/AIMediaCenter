@@ -8,25 +8,36 @@ import { buildRenameCtx, renderPath } from '@/core/transfer/rename';
 import { scrapeMedia } from '@/core/tmdb/scraper';
 import { refreshJellyfin } from '@/core/mediaserver/jellyfin';
 
-interface Paths {
+export interface Paths {
+  /** App-side view of the download dir (what organize() sees in-container). */
   download: string;
   movie: string;
   tv: string;
   transferType: TransferMode;
+  /**
+   * Path as qBittorrent sees its save location. On a docker-compose stack
+   * where qb shares a volume with the app this equals `download` (e.g.
+   * `/downloads`); on NAS deployments where qb is a host suite it's the
+   * host path (e.g. `/volume1/qBittorent`). Empty falls back to `download`
+   * to preserve the original local-docker behaviour.
+   */
+  qbSavePath?: string;
 }
 interface Naming {
   movie: string;
   tv: string;
 }
 
-async function loadPaths(): Promise<Paths> {
+export async function loadPaths(): Promise<Paths> {
   const row = await prisma.systemConfig.findUnique({ where: { key: 'paths' } });
   const p = row ? (JSON.parse(row.value) as Paths) : ({} as Paths);
+  const download = p.download || '/downloads';
   return {
-    download: p.download || '/downloads',
+    download,
     movie: p.movie || '/media/movies',
     tv: p.tv || '/media/tv',
-    transferType: (p.transferType as TransferMode) || 'link'
+    transferType: (p.transferType as TransferMode) || 'link',
+    qbSavePath: p.qbSavePath || download
   };
 }
 

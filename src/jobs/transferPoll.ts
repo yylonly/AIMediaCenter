@@ -1,20 +1,28 @@
 // Poll qBittorrent for completed torrents and run the transfer chain.
 import { prisma } from '@/lib/prisma';
 import { listTorrents } from '@/core/downloader/qbittorrent';
-import { organize } from '@/core/chain/transfer';
+import { organize, loadPaths } from '@/core/chain/transfer';
 
 const inflight = new Set<string>();
 
-/** Load host download path from DB (or a sensible default). */
-async function loadHostDownloadDir(): Promise<string> {
-  const row = await prisma.systemConfig.findUnique({ where: { key: 'paths' } });
-  const p = row ? (JSON.parse(row.value) as { download?: string }) : {};
-  return p.download || '/Users/yylonly/qb-test/downloads';
+/**
+ * Load the qb<->app path mapping from DB. qBittorrent reports save paths in
+ * its own filesystem view; organize() runs inside the app container and needs
+ * the app-side path. When qb is a sibling docker container the two views
+ * coincide (`/downloads`); when qb is a NAS host suite they differ (qb sees
+ * `/volume1/qBittorent`, app sees `/downloads` via a volume mount).
+ */
+async function loadPathMap(): Promise<{ qb: string; app: string }> {
+  const paths = await loadPaths();
+  return {
+    qb: (paths.qbSavePath || paths.download).replace(/\/$/, ''),
+    app: paths.download.replace(/\/$/, '')
+  };
 }
 
 export async function transferPoll(): Promise<void> {
   const torrents = await listTorrents({ status: 'completed' });
-  const hostDownloadDir = await loadHostDownloadDir();
+  const { qb: qbPath, app: appPath } = await loadPathMap();
 
   for (const t of torrents) {
     const hash = t.hash;
@@ -30,11 +38,13 @@ export async function transferPoll(): Promise<void> {
 
     inflight.add(hash);
     try {
-      // qBittorrent returns container paths (e.g. /downloads/tv/file.mkv).
-      // Translate to the host path so organize() can stat the real files.
+      // qBittorrent reports paths in its own view (qbPath); translate to the
+      // app-container view (appPath) so organize() can stat the real files.
       const containerPath = t.contentPath || `${t.savePath.replace(/\/$/, '')}/${t.name}`;
-      const hostPath = containerPath.replace(/^\/downloads/, hostDownloadDir);
-      console.log(`[transferPoll] organising ${hostPath} (container: ${containerPath})`);
+      const hostPath = qbPath && qbPath !== appPath
+        ? containerPath.replace(qbPath, appPath)
+        : containerPath;
+      console.log(`[transferPoll] organising ${hostPath} (qb: ${containerPath})`);
       await organize({
         source: hostPath,
         downloadHash: hash,

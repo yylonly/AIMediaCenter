@@ -12,7 +12,7 @@ interface Cfg {
   tmdb: { apiKey: string };
   qb: { url: string; username: string; password: string; categoryMovie: string; categoryTv: string };
   jellyfin: { url: string; apiKey: string };
-  paths: { download: string; movie: string; tv: string; transferType: string };
+  paths: { download: string; movie: string; tv: string; transferType: string; qbSavePath: string };
   naming: { movie: string; tv: string };
   proxy: {
     enabled: boolean;
@@ -26,7 +26,7 @@ const EMPTY: Cfg = {
   tmdb: { apiKey: '' },
   qb: { url: '', username: '', password: '', categoryMovie: 'movies', categoryTv: 'tv' },
   jellyfin: { url: '', apiKey: '' },
-  paths: { download: '/downloads', movie: '/media/movies', tv: '/media/tv', transferType: 'link' },
+  paths: { download: '/downloads', movie: '/media/movies', tv: '/media/tv', transferType: 'link', qbSavePath: '' },
   naming: { movie: '', tv: '' },
   proxy: {
     enabled: false,
@@ -52,9 +52,14 @@ export default function SettingsPage() {
         return r.json();
       })
       .then((d) => {
-        // Deep-merge proxy so configs saved before new fields existed still
-        // pick up the defaults (e.g. `global` added later).
-        setCfg({ ...EMPTY, ...d, proxy: { ...EMPTY.proxy, ...(d.proxy || {}) } });
+        // Deep-merge proxy & paths so configs saved before new fields existed
+        // still pick up the defaults (e.g. `global` / `qbSavePath` added later).
+        setCfg({
+          ...EMPTY,
+          ...d,
+          paths: { ...EMPTY.paths, ...(d.paths || {}) },
+          proxy: { ...EMPTY.proxy, ...(d.proxy || {}) }
+        });
         setLoadError(null);
       })
       .catch((e) => {
@@ -328,7 +333,8 @@ export default function SettingsPage() {
       <Card>
         <CardHeader><CardTitle>路径 & 整理模式</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {field('下载目录', <Input value={cfg.paths.download} onChange={(e) => set('paths', 'download', e.target.value)} />)}
+          {field('下载目录', <Input value={cfg.paths.download} onChange={(e) => set('paths', 'download', e.target.value)} placeholder="app 容器内看到的下载目录，如 /downloads" />)}
+          {field('qBittorrent 保存目录', <Input value={cfg.paths.qbSavePath} onChange={(e) => set('paths', 'qbSavePath', e.target.value)} placeholder="留空则同下载目录；NAS 套件 qb 填 /volume1/qBittorent" />)}
           {field('电影库目录', <Input value={cfg.paths.movie} onChange={(e) => set('paths', 'movie', e.target.value)} />)}
           {field('剧集库目录', <Input value={cfg.paths.tv} onChange={(e) => set('paths', 'tv', e.target.value)} />)}
           {field(

@@ -136,7 +136,8 @@ async function main() {
       download: process.env.DOWNLOAD_DIR || '/downloads',
       movie: process.env.LIBRARY_DIR_MOVIE || '/media/movies',
       tv: process.env.LIBRARY_DIR_TV || '/media/tv',
-      transferType: process.env.TRANSFER_TYPE || 'link'
+      transferType: process.env.TRANSFER_TYPE || 'link',
+      qbSavePath: process.env.QB_SAVE_PATH || ''
     },
     qb: {
       url: process.env.QB_URL || 'http://127.0.0.1:8080',

@@ -1,6 +1,7 @@
 // Download orchestration: enclosure → qB → DownloadHistory row.
 import { prisma } from '@/lib/prisma';
 import { addTorrent, getQbConfig } from '@/core/downloader/qbittorrent';
+import { loadPaths } from '@/core/chain/transfer';
 import { parseFilename } from '@/core/meta/metaVideo';
 import { tmdbSearch } from '@/core/tmdb/client';
 import type { TorrentInfo } from '@/core/indexer/base';
@@ -49,10 +50,12 @@ export async function submitDownload(opts: DownloadOptions): Promise<{
     (!media?.type && meta.type === 'unknown' && torrent.category === 'tv');
   const category = isTv ? cfg.categoryTv : cfg.categoryMovie;
 
-  // qBittorrent runs in Docker — always use the container-side path.
-  // The host path (config 'paths.download') is only used for post-download
-  // operations like transferPoll, not for telling qB where to save.
-  const savepath = `/downloads/${isTv ? 'tv' : 'movies'}`;
+  // qBittorrent's save path must be in qb's own filesystem view, which
+  // differs from the app's when qb is a host suite (NAS) rather than a
+  // sibling container. `paths.qbSavePath` captures that; it falls back to
+  // `paths.download` for the local-docker stack where the two coincide.
+  const paths = await loadPaths();
+  const savepath = `${(paths.qbSavePath || paths.download).replace(/\/$/, '')}/${isTv ? 'tv' : 'movies'}`;
 
   // For private PT sites, attach Cookie/UA/Referer to the .torrent download.
   // The enclosure URL may already carry &passkey= (set by NexusPHP indexer).
