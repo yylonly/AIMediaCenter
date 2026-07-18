@@ -12,7 +12,15 @@
 // A global EnvHttpProxyAgent is also set in instrumentation.ts as a fallback
 // for any fetch that isn't explicitly wrapped; NO_PROXY keeps LAN traffic
 // direct.
+//
+// NOTE on imports: dynamic `await import()` is unreliable inside Next.js
+// server bundles (webpack's namespace interop can strip constructors, and
+// node: builtins lose their exports). We therefore use static imports here;
+// for the CJS-only https-proxy-agent we go through createRequire, which
+// resolves the real package from node_modules at runtime.
 import { prisma } from '@/lib/prisma';
+import { createRequire } from 'node:module';
+import { ProxyAgent } from 'undici';
 
 export type ProxyScope = 'tmdb' | 'douban' | 'publicSites' | 'ptSites';
 
@@ -34,9 +42,8 @@ const DEFAULT_CONFIG: ProxyConfig = {
 };
 
 let cachedConfig: ProxyConfig | null = null;
-// undici ProxyAgent is lazily created (dynamic import keeps it out of the
-// client bundle and avoids loading undici on the browser edge).
-let cachedAgent: Promise<unknown> | null = null;
+// The undici ProxyAgent is lazily created and memoised per proxy URL.
+let cachedAgent: ProxyAgent | null = null;
 let cachedAgentUrl = '';
 
 /** Load proxy config from DB (cached, TTL-free - invalidate via resetProxyCache). */
@@ -96,13 +103,11 @@ async function shouldProxy(scope: ProxyScope, forceProxy?: boolean): Promise<boo
 export async function getDispatcher(
   scope: ProxyScope,
   forceProxy?: boolean
-): Promise<unknown | undefined> {
+): Promise<ProxyAgent | undefined> {
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
   if (cachedAgent && cachedAgentUrl === cfg.url) return cachedAgent;
-  // Dynamic import: undici is Node-only and shouldn't be in the edge bundle.
-  const { ProxyAgent } = await import('undici');
-  cachedAgent = Promise.resolve(new ProxyAgent({ uri: cfg.url }));
+  cachedAgent = new ProxyAgent({ uri: cfg.url });
   cachedAgentUrl = cfg.url;
   return cachedAgent;
 }
@@ -114,8 +119,10 @@ export async function getDispatcher(
  * software (Surge/ClashX), so we must use https-proxy-agent which handles
  * the CONNECT handshake properly. Returns undefined when the scope is off.
  *
- * Uses createRequire to load the CJS package - `await import()` returns the
- * module namespace where the constructor isn't callable in bundled output.
+ * Loads the CJS package via createRequire - webpack's module interop can't be
+ * trusted for it (v5 assigns the named export inside an IIFE, invisible to
+ * cjs-module-lexer), and https-proxy-agent is guaranteed present in
+ * node_modules because axios depends on it.
  */
 export async function getHttpsAgent(
   scope: ProxyScope,
@@ -123,9 +130,10 @@ export async function getHttpsAgent(
 ): Promise<unknown | undefined> {
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
-  const { createRequire } = await import('node:module');
   const req = createRequire(import.meta.url);
-  const { HttpsProxyAgent } = req('https-proxy-agent');
+  const { HttpsProxyAgent } = req('https-proxy-agent') as {
+    HttpsProxyAgent: new (url: string) => unknown;
+  };
   return new HttpsProxyAgent(cfg.url);
 }
 
