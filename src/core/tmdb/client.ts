@@ -1,6 +1,7 @@
 // TMDB client wrapper — uses `moviedb-promise`.
 // Config resolved from SystemConfig.tmdb.apiKey (DB) with env fallback.
 import { MovieDb } from 'moviedb-promise';
+import axios from 'axios';
 import { LRUCache } from 'lru-cache';
 import { prisma } from '@/lib/prisma';
 import { getAxiosProxyConfig, resetProxyCache } from '@/lib/proxy';
@@ -27,13 +28,12 @@ export async function getTmdb(): Promise<MovieDb | null> {
     clientPromise = (async () => {
       const key = await loadApiKey();
       if (!key) return null;
-      // moviedb-promise forwards the 3rd arg to axios request config; we use
-      // axios-native `proxy` option to route requests through the proxy when
-      // the tmdb scope is proxy-enabled (no extra agent package needed).
-      const opts: Record<string, unknown> = {};
+      // Apply the tmdb-scope proxy to axios defaults. axios is only used by
+      // moviedb-promise in this app, so this only affects TMDB traffic.
       const proxyCfg = await getAxiosProxyConfig('tmdb');
-      if (proxyCfg) opts.proxy = proxyCfg;
-      return new MovieDb(key, undefined, opts);
+      if (proxyCfg) axios.defaults.proxy = proxyCfg;
+      else delete axios.defaults.proxy;
+      return new MovieDb(key);
     })();
   }
   return clientPromise;
