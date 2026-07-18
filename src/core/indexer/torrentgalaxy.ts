@@ -3,6 +3,7 @@
 import * as cheerio from 'cheerio';
 import type { Indexer, SearchQuery, TorrentInfo } from './base';
 import { parseSize } from '@/lib/utils';
+import { fetchWithProxy } from '@/lib/proxy';
 
 const BASE = 'https://torrentgalaxy.one';
 
@@ -12,7 +13,7 @@ export const torrentgalaxy: Indexer = {
   url: BASE,
   async search(q: SearchQuery) {
     const url = new URL(`${BASE}/get-posts/keywords:${encodeURIComponent(q.keyword)}`);
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -59,7 +60,7 @@ export const torrentgalaxy: Indexer = {
       const results = await Promise.allSettled(
         chunk.map(async (r) => {
           const detailUrl = r.detail.startsWith('http') ? r.detail : `${BASE}${r.detail}`;
-          const dres = await fetch(detailUrl, {
+          const dres = await fetchWithProxy('publicSites', detailUrl, {
             headers: {
               'User-Agent':
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'

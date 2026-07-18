@@ -2,6 +2,7 @@
 // Endpoint: https://movie.douban.com/j/search_subjects
 // No auth required, but needs a browser-like User-Agent.
 import { LRUCache } from 'lru-cache';
+import { fetchWithProxy } from '@/lib/proxy';
 
 const cache = new LRUCache<string, any>({ max: 100, ttl: 60 * 60 * 1000 });
 
@@ -74,7 +75,7 @@ export async function doubanHot(
   url.searchParams.set('page_start', '0');
 
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithProxy('douban', url.toString(), {
       headers: {
         'User-Agent': UA,
         Referer: `${BASE}/`,

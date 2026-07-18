@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
+import { fetchWithProxy } from '@/lib/proxy';
 
 // Douban image proxy: doubanio.com refuses requests without a Referer
 // header (returns HTTP 418). Browsers may strip Referer due to
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(parsed.toString(), {
+    const res = await fetchWithProxy('douban', parsed.toString(), {
       headers: {
         'User-Agent': UA,
         Referer: 'https://movie.douban.com/',

@@ -3,6 +3,7 @@
 import { MovieDb } from 'moviedb-promise';
 import { LRUCache } from 'lru-cache';
 import { prisma } from '@/lib/prisma';
+import { getAxiosProxyConfig, resetProxyCache } from '@/lib/proxy';
 
 const cache = new LRUCache<string, any>({ max: 500, ttl: 60 * 60 * 1000 });
 
@@ -26,7 +27,13 @@ export async function getTmdb(): Promise<MovieDb | null> {
     clientPromise = (async () => {
       const key = await loadApiKey();
       if (!key) return null;
-      return new MovieDb(key);
+      // moviedb-promise forwards the 3rd arg to axios request config; we use
+      // axios-native `proxy` option to route requests through the proxy when
+      // the tmdb scope is proxy-enabled (no extra agent package needed).
+      const opts: Record<string, unknown> = {};
+      const proxyCfg = await getAxiosProxyConfig('tmdb');
+      if (proxyCfg) opts.proxy = proxyCfg;
+      return new MovieDb(key, undefined, opts);
     })();
   }
   return clientPromise;
@@ -36,6 +43,7 @@ export async function getTmdb(): Promise<MovieDb | null> {
 export function resetTmdbClient() {
   clientPromise = null;
   cache.clear();
+  resetProxyCache();
 }
 
 export interface TmdbBrief {

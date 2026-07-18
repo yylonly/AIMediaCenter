@@ -9,6 +9,7 @@
 //   4. GET various pages -> extract passkey
 import * as cheerio from 'cheerio';
 import { createHash, createHmac } from 'crypto';
+import { fetchWithProxy } from '@/lib/proxy';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -72,7 +73,7 @@ export async function fetchLoginPage(
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
   };
 
-  const res = await fetch(`${base}/login.php`, { headers, redirect: 'manual' });
+  const res = await fetchWithProxy('ptSites', `${base}/login.php`, { headers, redirect: 'manual' });
   if (!res.ok && res.status !== 302) {
     throw new Error(`GET /login.php 返回 HTTP ${res.status}`);
   }
@@ -129,7 +130,7 @@ export async function fetchCaptchaImage(
     Referer: imageUrl.replace(/image\.php.*$/, 'login.php')
   };
   if (cookie) headers['Cookie'] = cookie;
-  const res = await fetch(imageUrl, { headers });
+  const res = await fetchWithProxy('ptSites', imageUrl, { headers });
   if (!res.ok) {
     throw new Error(`获取验证码图片失败: HTTP ${res.status}`);
   }
@@ -173,7 +174,7 @@ async function getCraResponse(
     'Content-Type': 'application/json'
   };
   if (cookie) headers['Cookie'] = cookie;
-  const res = await fetch(`${base}/api/challenge`, {
+  const res = await fetchWithProxy('ptSites', `${base}/api/challenge`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ username })
@@ -238,7 +239,7 @@ export async function submitLogin(
     params.set('imagestring', opts.imagestring);
   }
 
-  const res = await fetch(`${base}/takelogin.php`, {
+  const res = await fetchWithProxy('ptSites', `${base}/takelogin.php`, {
     method: 'POST',
     headers,
     body: params.toString(),
@@ -320,7 +321,7 @@ export async function extractPasskey(
 
   for (const page of pages) {
     try {
-      const res = await fetch(`${base}/${page}`, { headers, redirect: 'manual' });
+      const res = await fetchWithProxy('ptSites', `${base}/${page}`, { headers, redirect: 'manual' });
       if (!res.ok && res.status !== 302) continue;
       const text = await res.text();
       // Match passkey=XXXX in URLs, or "PassKey" labels followed by the value
@@ -337,13 +338,13 @@ export async function extractPasskey(
   // Last resort: fetch the user profile link from index.php, then load it.
   // The profile page typically shows "密钥 (PassKey)" with the value.
   try {
-    const indexRes = await fetch(`${base}/index.php`, { headers, redirect: 'manual' });
+    const indexRes = await fetchWithProxy('ptSites', `${base}/index.php`, { headers, redirect: 'manual' });
     if (indexRes.ok || indexRes.status === 302) {
       const indexText = await indexRes.text();
       // Find userdetails.php?id=X link
       const profileLink = indexText.match(/userdetails\.php\?id=\d+/);
       if (profileLink) {
-        const profRes = await fetch(`${base}/${profileLink[0]}`, { headers });
+        const profRes = await fetchWithProxy('ptSites', `${base}/${profileLink[0]}`, { headers });
         if (profRes.ok) {
           const profText = await profRes.text();
           const m =

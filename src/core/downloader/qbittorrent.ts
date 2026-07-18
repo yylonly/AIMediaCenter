@@ -1,6 +1,7 @@
 // qBittorrent adapter — uses @ctrl/qbittorrent
 import { QBittorrent } from '@ctrl/qbittorrent';
 import { prisma } from '@/lib/prisma';
+import { fetchWithProxy } from '@/lib/proxy';
 
 /** Convert a Base32 string (RFC 4648) to lowercase hex. Used for BitTorrent info hashes. */
 function base32ToHex(b32: string): string {
@@ -87,7 +88,7 @@ async function fetchTorrentFile(
   const fetchOpts: RequestInit = headers ? { headers } : {};
   fetchOpts.redirect = 'manual';
 
-  let res = await fetch(enclosure, fetchOpts);
+  let res = await fetchWithProxy('ptSites', enclosure, fetchOpts);
 
   // Handle redirect to downloadnotice.php (NexusPHP first-download confirmation)
   if (res.status >= 300 && res.status < 400) {
@@ -100,7 +101,7 @@ async function fetchTorrentFile(
       const referer = enclosure.replace(/[?&].*/, '');
 
       // POST the confirmation form to dismiss the notice
-      const noticeRes = await fetch(noticeUrl, {
+      const noticeRes = await fetchWithProxy('ptSites', noticeUrl, {
         method: 'POST',
         headers: {
           ...(headers || {}),
@@ -121,7 +122,7 @@ async function fetchTorrentFile(
         const dlLoc = noticeRes.headers.get('location') || '';
         if (dlLoc) {
           const dlUrl = dlLoc.startsWith('http') ? dlLoc : new URL(dlLoc, enclosure).href;
-          const dlRes = await fetch(dlUrl, fetchOpts);
+          const dlRes = await fetchWithProxy('ptSites', dlUrl, fetchOpts);
           if (dlRes.ok) return Buffer.from(await dlRes.arrayBuffer());
         }
       }
@@ -134,7 +135,7 @@ async function fetchTorrentFile(
       const loc2 = res.headers.get('location') || '';
       if (loc2) {
         const followUrl = loc2.startsWith('http') ? loc2 : new URL(loc2, enclosure).href;
-        const r2 = await fetch(followUrl, fetchOpts);
+        const r2 = await fetchWithProxy('ptSites', followUrl, fetchOpts);
         if (r2.ok) return Buffer.from(await r2.arrayBuffer());
       }
     }

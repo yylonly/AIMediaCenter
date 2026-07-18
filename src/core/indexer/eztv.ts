@@ -1,6 +1,7 @@
 // EZTV — public TV torrent site with JSON API.
 // https://eztvx.to/api/get-torrents
 import type { Indexer, SearchQuery, TorrentInfo } from './base';
+import { fetchWithProxy } from '@/lib/proxy';
 
 const BASE = 'https://eztvx.to';
 
@@ -13,7 +14,7 @@ export const eztv: Indexer = {
     const url = new URL(`${BASE}/api/get-torrents`);
     url.searchParams.set('q', q.keyword);
     url.searchParams.set('limit', '50');
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
     });
     if (!res.ok) return [];

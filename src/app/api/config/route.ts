@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
 import { prisma } from '@/lib/prisma';
 import { resetTmdbClient } from '@/core/tmdb/client';
+import { resetProxyCache } from '@/lib/proxy';
 
 export async function GET(req: NextRequest) {
   const auth = await requireAuth(req);
@@ -30,7 +31,8 @@ export async function POST(req: NextRequest) {
       create: { key, value: JSON.stringify(value) }
     });
   }
-  // Invalidate memoised clients
+  // Invalidate memoised clients (proxy config change affects all of them)
+  resetProxyCache();
   resetTmdbClient();
   return NextResponse.json({ ok: true });
 }

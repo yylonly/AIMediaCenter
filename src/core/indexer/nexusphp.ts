@@ -7,6 +7,7 @@
 import * as cheerio from 'cheerio';
 import type { Indexer, SearchQuery, TorrentInfo } from './base';
 import { parseSize } from '@/lib/utils';
+import { fetchWithProxy } from '@/lib/proxy';
 import { prisma } from '@/lib/prisma';
 import type { Site } from '@prisma/client';
 
@@ -87,7 +88,7 @@ export async function nexusphpSearch(site: Site, q: SearchQuery): Promise<Torren
   }
   if (q.page && q.page > 1) url.searchParams.set('page', String(q.page - 1));
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithProxy('ptSites', url.toString(), {
     headers,
     redirect: 'manual'
   });
@@ -108,7 +109,7 @@ export async function nexusphpSearch(site: Site, q: SearchQuery): Promise<Torren
     if (/login|takelogin/i.test(loc)) {
       throw new Error('Cookie expired or not logged in');
     }
-    const r2 = await fetch(resolveUrl(loc, base), { headers });
+    const r2 = await fetchWithProxy('ptSites', resolveUrl(loc, base), { headers });
     html = await r2.text();
   } else {
     html = await res.text();

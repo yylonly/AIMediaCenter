@@ -2,6 +2,7 @@
 import * as cheerio from 'cheerio';
 import type { Indexer, SearchQuery, TorrentInfo } from './base';
 import { parseSize } from '@/lib/utils';
+import { fetchWithProxy } from '@/lib/proxy';
 
 export const nyaa: Indexer = {
   domain: 'nyaa.si',
@@ -15,7 +16,7 @@ export const nyaa: Indexer = {
     url.searchParams.set('s', 'seeders');
     url.searchParams.set('o', 'desc');
     if (q.page && q.page > 1) url.searchParams.set('p', String(q.page));
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
     });
     if (!res.ok) return [];

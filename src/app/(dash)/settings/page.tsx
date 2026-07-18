@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, Upload, Loader2 } from 'lucide-react';
 
@@ -13,6 +14,11 @@ interface Cfg {
   jellyfin: { url: string; apiKey: string };
   paths: { download: string; movie: string; tv: string; transferType: string };
   naming: { movie: string; tv: string };
+  proxy: {
+    enabled: boolean;
+    url: string;
+    scopes: { tmdb: boolean; douban: boolean; publicSites: boolean; ptSites: boolean };
+  };
 }
 
 const EMPTY: Cfg = {
@@ -20,9 +26,11 @@ const EMPTY: Cfg = {
   qb: { url: '', username: '', password: '', categoryMovie: 'movies', categoryTv: 'tv' },
   jellyfin: { url: '', apiKey: '' },
   paths: { download: '/downloads', movie: '/media/movies', tv: '/media/tv', transferType: 'link' },
-  naming: {
-    movie: '',
-    tv: ''
+  naming: { movie: '', tv: '' },
+  proxy: {
+    enabled: false,
+    url: '',
+    scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false }
   }
 };
 
@@ -211,6 +219,57 @@ export default function SettingsPage() {
           <div className="text-right">
             <Button variant="outline" size="sm" onClick={testTmdb}>测试连接</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>代理（HTTP/HTTPS）</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {field(
+            '启用代理',
+            <div className="flex items-center gap-2 pt-2">
+              <Checkbox
+                checked={cfg.proxy.enabled}
+                onCheckedChange={(v) => setCfg({ ...cfg, proxy: { ...cfg.proxy, enabled: !!v } })}
+              />
+              <span className="text-sm text-muted-foreground">勾选后按下方开关生效</span>
+            </div>
+          )}
+          {field(
+            '代理地址',
+            <Input
+              value={cfg.proxy.url}
+              onChange={(e) => setCfg({ ...cfg, proxy: { ...cfg.proxy, url: e.target.value } })}
+              placeholder="http://192.168.124.1:7890"
+            />
+          )}
+          <div className="grid grid-cols-3 items-center gap-3">
+            <label className="text-sm text-muted-foreground">生效范围</label>
+            <div className="col-span-2 flex flex-wrap gap-4 pt-1 text-sm">
+              {([
+                ['tmdb', 'TMDB'],
+                ['douban', '豆瓣'],
+                ['publicSites', '公开站点'],
+                ['ptSites', 'PT 站点']
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2">
+                  <Checkbox
+                    checked={cfg.proxy.scopes[key]}
+                    onCheckedChange={(v) =>
+                      setCfg({
+                        ...cfg,
+                        proxy: { ...cfg.proxy, scopes: { ...cfg.proxy.scopes, [key]: !!v } }
+                      })
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            qBittorrent 与 Jellyfin（内网）始终直连，不受代理影响。保存后立即生效。
+          </p>
         </CardContent>
       </Card>
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
+import { fetchWithProxy } from '@/lib/proxy';
 
 // TMDB image proxy: image.tmdb.org is frequently blocked or unreliable from
 // end-user browsers (especially in CN). The server-side host can usually
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(parsed.toString(), {
+    const res = await fetchWithProxy('tmdb', parsed.toString(), {
       headers: {
         'User-Agent': UA,
         Accept: 'image/*,*/*;q=0.8'

@@ -3,6 +3,7 @@
 import * as cheerio from 'cheerio';
 import type { Indexer, SearchQuery, TorrentInfo } from './base';
 import { parseSize } from '@/lib/utils';
+import { fetchWithProxy } from '@/lib/proxy';
 
 const BASE = 'https://www.1337xx.to';
 
@@ -12,7 +13,7 @@ export const leetx: Indexer = {
   url: BASE,
   async search(q: SearchQuery) {
     const path = `/search/${encodeURIComponent(q.keyword)}/${q.page || 1}/`;
-    const res = await fetch(BASE + path, {
+    const res = await fetchWithProxy('publicSites', BASE + path, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -41,7 +42,7 @@ export const leetx: Indexer = {
     for (const chunk of chunks) {
       const results = await Promise.allSettled(
         chunk.map(async (r) => {
-          const detail = await fetch(BASE + r.page, {
+          const detail = await fetchWithProxy('publicSites', BASE + r.page, {
             headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
           });
           if (!detail.ok) return null;

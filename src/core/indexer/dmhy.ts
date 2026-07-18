@@ -3,6 +3,7 @@
 import * as cheerio from 'cheerio';
 import type { Indexer, SearchQuery, TorrentInfo } from './base';
 import { parseSize } from '@/lib/utils';
+import { fetchWithProxy } from '@/lib/proxy';
 
 const BASE = 'https://share.dmhy.org';
 
@@ -14,7 +15,7 @@ export const dmhy: Indexer = {
     const url = new URL(`${BASE}/topics/list`);
     url.searchParams.set('keyword', q.keyword);
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithProxy('publicSites', url.toString(), {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'

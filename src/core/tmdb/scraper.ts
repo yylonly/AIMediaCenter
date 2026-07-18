@@ -3,6 +3,7 @@ import { create } from 'xmlbuilder2';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { TmdbBrief } from './client';
+import { fetchWithProxy } from '@/lib/proxy';
 
 function buildMovieNfo(m: TmdbBrief): string {
   const root = create({ version: '1.0', encoding: 'utf-8' }).ele('movie');
@@ -32,7 +33,7 @@ function buildTvShowNfo(m: TmdbBrief): string {
 
 async function downloadFile(url: string, dest: string): Promise<void> {
   try {
-    const res = await fetch(url);
+    const res = await fetchWithProxy('tmdb', url);
     if (!res.ok) return;
     const buf = Buffer.from(await res.arrayBuffer());
     await fs.mkdir(path.dirname(dest), { recursive: true });
