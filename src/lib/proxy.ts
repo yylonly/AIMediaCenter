@@ -108,26 +108,20 @@ export async function getDispatcher(
 }
 
 /**
- * Return axios-native proxy config for moviedb-promise. axios 1.x supports a
- * `proxy` option (host/port/protocol) without needing any agent package.
- * Returns undefined when the scope is not proxy-enabled.
+ * Return an https.Agent (HttpsProxyAgent) configured to route through the
+ * proxy, for axios-based clients (moviedb-promise). axios's built-in `proxy`
+ * option breaks HTTPS-over-HTTP-proxy with ECONNRESET against some proxy
+ * software (Surge/ClashX), so we must use https-proxy-agent which handles
+ * the CONNECT handshake properly. Returns undefined when the scope is off.
  */
-export async function getAxiosProxyConfig(
+export async function getHttpsAgent(
   scope: ProxyScope,
   forceProxy?: boolean
-): Promise<{ host: string; port: number; protocol: string } | undefined> {
+): Promise<unknown | undefined> {
   if (!(await shouldProxy(scope, forceProxy))) return undefined;
   const cfg = await loadProxyConfig();
-  try {
-    const u = new URL(cfg.url);
-    return {
-      host: u.hostname,
-      port: Number(u.port) || (u.protocol === 'https:' ? 443 : 80),
-      protocol: u.protocol.replace(':', '')
-    };
-  } catch {
-    return undefined;
-  }
+  const { HttpsProxyAgent } = await import('https-proxy-agent');
+  return new HttpsProxyAgent(cfg.url);
 }
 
 /**

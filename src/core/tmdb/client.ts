@@ -4,11 +4,12 @@ import { MovieDb } from 'moviedb-promise';
 import axios from 'axios';
 import { LRUCache } from 'lru-cache';
 import { prisma } from '@/lib/prisma';
-import { getAxiosProxyConfig, resetProxyCache } from '@/lib/proxy';
+import { getHttpsAgent, resetProxyCache } from '@/lib/proxy';
 
 const cache = new LRUCache<string, any>({ max: 500, ttl: 60 * 60 * 1000 });
 
 let clientPromise: Promise<MovieDb | null> | null = null;
+let interceptorInstalled = false;
 
 async function loadApiKey(): Promise<string | null> {
   const row = await prisma.systemConfig.findUnique({ where: { key: 'tmdb' } });
@@ -23,16 +24,28 @@ async function loadApiKey(): Promise<string | null> {
   return process.env.TMDB_API_KEY || null;
 }
 
+/**
+ * Install an axios request interceptor once. It injects the tmdb proxy agent
+ * into every axios request. axios.defaults.httpsAgent does NOT reliably reach
+ * moviedb-promise's requests (and fails HTTPS-over-HTTP-proxy with ECONNRESET
+ * against some proxy software), so we hook the request interceptor instead.
+ */
+async function installProxyInterceptor() {
+  if (interceptorInstalled) return;
+  const agent = await getHttpsAgent('tmdb');
+  axios.interceptors.request.use((config) => {
+    if (agent && !config.httpsAgent) config.httpsAgent = agent;
+    return config;
+  });
+  interceptorInstalled = true;
+}
+
 export async function getTmdb(): Promise<MovieDb | null> {
   if (!clientPromise) {
     clientPromise = (async () => {
       const key = await loadApiKey();
       if (!key) return null;
-      // Apply the tmdb-scope proxy to axios defaults. axios is only used by
-      // moviedb-promise in this app, so this only affects TMDB traffic.
-      const proxyCfg = await getAxiosProxyConfig('tmdb');
-      if (proxyCfg) axios.defaults.proxy = proxyCfg;
-      else delete axios.defaults.proxy;
+      await installProxyInterceptor();
       return new MovieDb(key);
     })();
   }
