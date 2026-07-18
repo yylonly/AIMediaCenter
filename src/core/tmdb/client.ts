@@ -1,7 +1,6 @@
 // TMDB client wrapper — uses `moviedb-promise`.
 // Config resolved from SystemConfig.tmdb.apiKey (DB) with env fallback.
 import { MovieDb } from 'moviedb-promise';
-import axios from 'axios';
 import { LRUCache } from 'lru-cache';
 import { prisma } from '@/lib/prisma';
 import { getHttpsAgent, resetProxyCache } from '@/lib/proxy';
@@ -9,7 +8,6 @@ import { getHttpsAgent, resetProxyCache } from '@/lib/proxy';
 const cache = new LRUCache<string, any>({ max: 500, ttl: 60 * 60 * 1000 });
 
 let clientPromise: Promise<MovieDb | null> | null = null;
-let interceptorInstalled = false;
 
 async function loadApiKey(): Promise<string | null> {
   const row = await prisma.systemConfig.findUnique({ where: { key: 'tmdb' } });
@@ -24,29 +22,25 @@ async function loadApiKey(): Promise<string | null> {
   return process.env.TMDB_API_KEY || null;
 }
 
-/**
- * Install an axios request interceptor once. It injects the tmdb proxy agent
- * into every axios request. axios.defaults.httpsAgent does NOT reliably reach
- * moviedb-promise's requests (and fails HTTPS-over-HTTP-proxy with ECONNRESET
- * against some proxy software), so we hook the request interceptor instead.
- */
-async function installProxyInterceptor() {
-  if (interceptorInstalled) return;
-  const agent = await getHttpsAgent('tmdb');
-  axios.interceptors.request.use((config) => {
-    if (agent && !config.httpsAgent) config.httpsAgent = agent;
-    return config;
-  });
-  interceptorInstalled = true;
-}
-
 export async function getTmdb(): Promise<MovieDb | null> {
   if (!clientPromise) {
     clientPromise = (async () => {
       const key = await loadApiKey();
       if (!key) return null;
-      await installProxyInterceptor();
-      return new MovieDb(key);
+      const tmdb = new MovieDb(key);
+      // Route TMDB traffic through the proxy by patching THIS instance's
+      // makeRequest to carry our httpsAgent on every call. Global axios
+      // interceptors / axios.defaults do NOT work here: webpack bundles a
+      // separate axios copy into each server chunk, so the axios instance
+      // moviedb-promise uses is a different object from anything we import.
+      const agent = await getHttpsAgent('tmdb');
+      if (agent) {
+        const inner = tmdb as any;
+        const orig = inner.makeRequest.bind(inner);
+        inner.makeRequest = (method: any, endpoint: any, params: any = {}, axiosConfig: any = {}) =>
+          orig(method, endpoint, params, { httpsAgent: agent, ...axiosConfig });
+      }
+      return tmdb;
     })();
   }
   return clientPromise;
