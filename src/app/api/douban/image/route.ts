@@ -30,13 +30,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetchWithProxy('douban', parsed.toString(), {
-      headers: {
-        'User-Agent': UA,
-        Referer: 'https://movie.douban.com/',
-        Accept: 'image/*,*/*;q=0.8'
-      }
-    });
+    let res: Response;
+    const headers = {
+      'User-Agent': UA,
+      Referer: 'https://movie.douban.com/',
+      Accept: 'image/*,*/*;q=0.8'
+    };
+    try {
+      res = await fetchWithProxy('douban', parsed.toString(), { headers });
+    } catch {
+      // Proxy down/misrouted? Fall back to a direct fetch - doubanio CDN is
+      // usually reachable domestically.
+      res = await fetch(parsed.toString(), { headers });
+    }
     if (!res.ok) return NextResponse.json({ error: `upstream ${res.status}` }, { status: 502 });
     const buf = await res.arrayBuffer();
     const contentType = res.headers.get('content-type') || 'image/jpeg';

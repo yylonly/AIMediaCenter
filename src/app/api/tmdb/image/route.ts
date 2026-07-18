@@ -30,12 +30,25 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetchWithProxy('tmdb', parsed.toString(), {
-      headers: {
-        'User-Agent': UA,
-        Accept: 'image/*,*/*;q=0.8'
-      }
-    });
+    let res: Response;
+    try {
+      res = await fetchWithProxy('tmdb', parsed.toString(), {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'image/*,*/*;q=0.8'
+        }
+      });
+    } catch {
+      // Proxy down/misrouted? Fall back to a direct fetch - image.tmdb.org
+      // is a public CDN and often reachable even when api.themoviedb.org
+      // is not (e.g. via a transparent proxy on the gateway).
+      res = await fetch(parsed.toString(), {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'image/*,*/*;q=0.8'
+        }
+      });
+    }
     if (!res.ok) return NextResponse.json({ error: `upstream ${res.status}` }, { status: 502 });
     const buf = await res.arrayBuffer();
     const contentType = res.headers.get('content-type') || 'image/jpeg';
