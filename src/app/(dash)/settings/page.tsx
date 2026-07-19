@@ -50,7 +50,15 @@ interface Cfg {
     enabled: boolean;
     url: string;
     global: boolean;
-    scopes: { tmdb: boolean; douban: boolean; publicSites: boolean; ptSites: boolean };
+    scopes: { tmdb: boolean; douban: boolean; publicSites: boolean; ptSites: boolean; subtitles: boolean };
+  };
+  subtitle: {
+    enabled: boolean;
+    apiKey: string;
+    username: string;
+    password: string;
+    language: string;
+    downloadOnOrganize: boolean;
   };
 }
 
@@ -84,7 +92,15 @@ const EMPTY: Cfg = {
     enabled: false,
     url: '',
     global: false,
-    scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false }
+    scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false, subtitles: false }
+  },
+  subtitle: {
+    enabled: false,
+    apiKey: '',
+    username: '',
+    password: '',
+    language: 'zh-CN',
+    downloadOnOrganize: true
   }
 };
 
@@ -178,7 +194,12 @@ export default function SettingsPage() {
           ...EMPTY,
           ...rest,
           paths,
-          proxy: { ...EMPTY.proxy, ...(rest.proxy || {}) }
+          proxy: {
+            ...EMPTY.proxy,
+            ...(rest.proxy || {}),
+            scopes: { ...EMPTY.proxy.scopes, ...((rest.proxy || {}).scopes || {}) }
+          },
+          subtitle: { ...EMPTY.subtitle, ...(rest.subtitle || {}) }
         });
         setLoadError(null);
       })
@@ -477,7 +498,7 @@ export default function SettingsPage() {
                 onCheckedChange={(v) => setCfg({ ...cfg, proxy: { ...cfg.proxy, global: !!v } })}
               />
               <span className="text-sm text-muted-foreground">
-                所有外网请求（TMDB/豆瓣/公开站点/PT 站点）都走代理，忽略下方单项开关
+                所有外网请求（TMDB/豆瓣/公开站点/PT 站点/字幕）都走代理，忽略下方单项开关
               </span>
             </div>
           </div>
@@ -488,7 +509,8 @@ export default function SettingsPage() {
                 ['tmdb', 'TMDB'],
                 ['douban', '豆瓣'],
                 ['publicSites', '公开站点'],
-                ['ptSites', 'PT 站点']
+                ['ptSites', 'PT 站点'],
+                ['subtitles', '字幕']
               ] as const).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2">
                   <Checkbox
@@ -542,6 +564,65 @@ export default function SettingsPage() {
               {jfSyncing && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}同步媒体库
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>字幕（OpenSubtitles）</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {field(
+            '整理后自动下载',
+            <div className="flex items-center gap-2 pt-2">
+              <Checkbox
+                checked={cfg.subtitle.enabled}
+                onCheckedChange={(v) =>
+                  setCfg({ ...cfg, subtitle: { ...cfg.subtitle, enabled: !!v, downloadOnOrganize: !!v } })
+                }
+              />
+              <span className="text-sm text-muted-foreground">
+                视频没有自带字幕时，自动下载中文字幕（保存为 视频名.zh.srt）
+              </span>
+            </div>
+          )}
+          {field(
+            'API Key',
+            <Input
+              value={cfg.subtitle.apiKey}
+              onChange={(e) => set('subtitle', 'apiKey', e.target.value)}
+              placeholder="opensubtitles.com → Settings → API"
+            />
+          )}
+          {field(
+            '账号（可选，提额）',
+            <Input
+              value={cfg.subtitle.username}
+              onChange={(e) => set('subtitle', 'username', e.target.value)}
+              placeholder="opensubtitles.com 用户名"
+            />
+          )}
+          {field(
+            '密码（可选）',
+            <Input
+              type="password"
+              value={cfg.subtitle.password}
+              onChange={(e) => set('subtitle', 'password', e.target.value)}
+            />
+          )}
+          {field(
+            '语言偏好',
+            <select
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              value={cfg.subtitle.language}
+              onChange={(e) => set('subtitle', 'language', e.target.value)}
+            >
+              <option value="zh-CN">简体中文（zh-CN）</option>
+              <option value="zh-TW">繁体中文（zh-TW）</option>
+              <option value="both">双语皆可（简体优先）</option>
+            </select>
+          )}
+          <p className="text-xs text-muted-foreground">
+            需要在 <a className="underline" href="https://www.opensubtitles.com" target="_blank" rel="noreferrer">opensubtitles.com</a> 注册免费账号并生成 API Key。仅 API Key 时下载 5 次/天，填账号密码后 20 次/天；整季整理遇额度耗尽会自动跳过剩余集。下载请求走代理（需在上方代理卡勾选「字幕」或开全局）。
+          </p>
         </CardContent>
       </Card>
 

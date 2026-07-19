@@ -157,6 +157,14 @@ async function main() {
       url: process.env.JELLYFIN_URL || 'http://127.0.0.1:8096',
       apiKey: process.env.JELLYFIN_API_KEY || ''
     },
+    subtitle: {
+      enabled: false,
+      apiKey: '',
+      username: '',
+      password: '',
+      language: 'zh-CN',
+      downloadOnOrganize: true
+    },
     tmdb: {
       apiKey: process.env.TMDB_API_KEY || ''
     }

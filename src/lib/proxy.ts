@@ -24,7 +24,7 @@ import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'node:zlib';
 
-export type ProxyScope = 'tmdb' | 'douban' | 'publicSites' | 'ptSites';
+export type ProxyScope = 'tmdb' | 'douban' | 'publicSites' | 'ptSites' | 'subtitles';
 
 export interface ProxyConfig {
   enabled: boolean;
@@ -36,6 +36,7 @@ export interface ProxyConfig {
     douban: boolean;
     publicSites: boolean;
     ptSites: boolean;
+    subtitles: boolean;
   };
 }
 
@@ -43,7 +44,7 @@ const DEFAULT_CONFIG: ProxyConfig = {
   enabled: false,
   url: '',
   global: false,
-  scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false }
+  scopes: { tmdb: false, douban: false, publicSites: false, ptSites: false, subtitles: false }
 };
 
 let cachedConfig: ProxyConfig | null = null;
@@ -66,7 +67,8 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
         tmdb: !!v.scopes?.tmdb,
         douban: !!v.scopes?.douban,
         publicSites: !!v.scopes?.publicSites,
-        ptSites: !!v.scopes?.ptSites
+        ptSites: !!v.scopes?.ptSites,
+        subtitles: !!v.scopes?.subtitles
       }
     };
   } catch {

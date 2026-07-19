@@ -6,6 +6,7 @@ import { tmdbSearch, tmdbDetail, type TmdbBrief } from '@/core/tmdb/client';
 import { walkVideos, findSubtitles, transferFile, type TransferMode } from '@/core/transfer/transferer';
 import { buildRenameCtx, renderPath } from '@/core/transfer/rename';
 import { scrapeMedia } from '@/core/tmdb/scraper';
+import { ensureChineseSubtitle } from '@/core/subtitle/download';
 import { refreshJellyfin } from '@/core/mediaserver/jellyfin';
 import { inferMediaCategory, categoryType, type MediaCategory, type MediaType } from '@/core/transfer/category';
 
@@ -312,6 +313,13 @@ export async function organize(opts: TransferOptions): Promise<{
         const subExt = path.extname(sub);
         const subDest = dest.replace(/\.[^.]+$/, subExt);
         await transferFile(sub, subDest, mode);
+      }
+      // No subtitle came along with the source: try downloading a Chinese
+      // one (best-effort, never breaks the organize flow).
+      if (subs.length === 0 && media) {
+        await ensureChineseSubtitle(dest, media, meta).catch((e) =>
+          console.warn('[transfer] subtitle download failed', (e as Error).message)
+        );
       }
 
       // Scrape (nfo + poster)
