@@ -179,16 +179,36 @@ function isRetriableConnError(e: unknown): boolean {
 
 const MAX_PROXY_ATTEMPTS = 5;
 
+/** HTTP status codes worth retrying: proxy egress rotation can land on
+ *  nodes whose IPs are blocked by the destination (403) or rate-limited
+ *  (429), and 502/503/504 are transient gateway errors. A retry on a
+ *  fresh connection usually lands on a working node. */
+const RETRIABLE_STATUS = new Set([403, 429, 502, 503, 504]);
+
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Run a proxied operation with retries on connection-level failures. */
+/**
+ * Run a proxied operation with retries on connection-level failures OR
+ * retriable HTTP status codes. Proxy software that rotates egress nodes
+ * per connection sometimes lands on a node whose IP is blocked by the
+ * destination (403) or whose connection is reset (ECONNRESET) - a fresh
+ * connection usually lands on a working node.
+ */
 export async function withProxyRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_PROXY_ATTEMPTS; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      // Retry on retriable HTTP status codes (fn returns a Response).
+      if (result && typeof result === 'object' && 'status' in result && RETRIABLE_STATUS.has((result as Response).status)) {
+        lastErr = new Error(`HTTP ${(result as Response).status}`);
+        if (attempt === MAX_PROXY_ATTEMPTS) return result;
+        await sleep(200 * Math.pow(2, attempt - 1));
+        continue;
+      }
+      return result;
     } catch (e) {
       lastErr = e;
       if (!isRetriableConnError(e) || attempt === MAX_PROXY_ATTEMPTS) throw e;
