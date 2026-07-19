@@ -202,11 +202,14 @@ export async function withProxyRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
       const result = await fn();
       // Retry on retriable HTTP status codes (fn returns a Response).
-      if (result && typeof result === 'object' && 'status' in result && RETRIABLE_STATUS.has((result as Response).status)) {
-        lastErr = new Error(`HTTP ${(result as Response).status}`);
-        if (attempt === MAX_PROXY_ATTEMPTS) return result;
-        await sleep(200 * Math.pow(2, attempt - 1));
-        continue;
+      if (result && typeof result === 'object' && 'status' in result) {
+        const status = (result as unknown as Response).status;
+        if (RETRIABLE_STATUS.has(status)) {
+          lastErr = new Error(`HTTP ${status}`);
+          if (attempt === MAX_PROXY_ATTEMPTS) return result;
+          await sleep(200 * Math.pow(2, attempt - 1));
+          continue;
+        }
       }
       return result;
     } catch (e) {
