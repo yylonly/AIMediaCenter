@@ -22,8 +22,10 @@ jobs:
         include:
           - platform: linux/amd64
             runner: ubuntu-latest
+            slug: linux-amd64
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
+            slug: linux-arm64
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -64,7 +66,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.platform }}
+          name: digest-${{ matrix.slug }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
