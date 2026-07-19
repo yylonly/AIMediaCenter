@@ -116,7 +116,11 @@ export async function submitDownload(opts: DownloadOptions): Promise<{
       torrentName: torrent.title,
       torrentDescription: torrent.description,
       torrentSite: torrent.site,
-      username
+      username,
+      // Record which path profile was active so transferPoll can later map
+      // qb-side paths back to the app-container view using the same profile,
+      // even if the active profile has since been switched.
+      pathProfileId: paths.id
     }
   });
   return { ok: true, hash: add.hash, historyId: history.id };

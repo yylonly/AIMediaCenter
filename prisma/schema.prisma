@@ -112,6 +112,11 @@ model DownloadHistory {
   username           String?
   createdAt          DateTime @default(now())
   note               String?
+  /** Id of the PathProfile that was active when this download was submitted.
+   *  transferPoll uses it to map qb-side paths back to app-container paths
+   *  with the correct profile, so switching the active profile later doesn't
+   *  break organising downloads that were saved under an older profile. */
+  pathProfileId      String?
 
   @@index([tmdbid])
   @@index([downloadHash])

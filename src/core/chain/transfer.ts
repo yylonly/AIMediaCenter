@@ -8,37 +8,111 @@ import { buildRenameCtx, renderPath } from '@/core/transfer/rename';
 import { scrapeMedia } from '@/core/tmdb/scraper';
 import { refreshJellyfin } from '@/core/mediaserver/jellyfin';
 
-export interface Paths {
+export interface PathProfile {
+  /** Unique id (uuid-ish or slug). */
+  id: string;
+  /** Display name, e.g. "NAS 套件" or "Docker 栈". */
+  name: string;
   /** App-side view of the download dir (what organize() sees in-container). */
   download: string;
-  movie: string;
-  tv: string;
-  transferType: TransferMode;
   /**
    * Path as qBittorrent sees its save location. On a docker-compose stack
    * where qb shares a volume with the app this equals `download` (e.g.
    * `/downloads`); on NAS deployments where qb is a host suite it's the
-   * host path (e.g. `/volume1/qBittorent`). Empty falls back to `download`
-   * to preserve the original local-docker behaviour.
+   * host path (e.g. `/volume1/qBittorent`). Empty falls back to `download`.
    */
-  qbSavePath?: string;
+  qbSavePath: string;
+  /** Movie library root (organize destination for movies). */
+  movie: string;
+  /** TV library root (organize destination for tv). */
+  tv: string;
+  /** Transfer mode: link/softlink/copy/move. */
+  transferType: TransferMode;
+}
+
+export interface PathsConfig {
+  /** Id of the currently active profile (must exist in `profiles`). */
+  activeId: string;
+  /** All saved profiles. At least one must always exist. */
+  profiles: PathProfile[];
+}
+
+const DEFAULT_PROFILE: PathProfile = {
+  id: 'default',
+  name: '默认',
+  download: '/downloads',
+  qbSavePath: '',
+  movie: '/media/movies',
+  tv: '/media/tv',
+  transferType: 'link'
+};
+
+/** Fill missing fields / apply fallbacks (qbSavePath -> download). */
+function normalizeProfile(p: Partial<PathProfile> & { id: string }): PathProfile {
+  const download = p.download || '/downloads';
+  return {
+    id: p.id,
+    name: p.name || '未命名',
+    download,
+    qbSavePath: p.qbSavePath || download,
+    movie: p.movie || '/media/movies',
+    tv: p.tv || '/media/tv',
+    transferType: (p.transferType as TransferMode) || 'link'
+  };
+}
+
+/**
+ * Load the currently active path profile. Backwards-compatible: old single-
+ * object configs ({ download, movie, tv, ... } without `profiles`) are
+ * auto-wrapped into a single 'default' profile so no DB migration is needed.
+ */
+export async function loadPaths(): Promise<PathProfile> {
+  const cfg = await loadPathsConfig();
+  const active = cfg.profiles.find((p) => p.id === cfg.activeId) || cfg.profiles[0];
+  return normalizeProfile(active);
+}
+
+/** Load the full paths config (all profiles + activeId) for UI editing. */
+export async function loadPathsConfig(): Promise<PathsConfig> {
+  const row = await prisma.systemConfig.findUnique({ where: { key: 'paths' } });
+  if (!row) return { activeId: DEFAULT_PROFILE.id, profiles: [DEFAULT_PROFILE] };
+  try {
+    const v = JSON.parse(row.value) as Partial<PathsConfig> & Record<string, unknown>;
+    // New format: { activeId, profiles[] }
+    if (Array.isArray(v.profiles) && v.profiles.length > 0) {
+      const profiles = v.profiles.map((p) => normalizeProfile(p as PathProfile));
+      const activeId = (v.activeId as string) || profiles[0].id;
+      return { activeId, profiles };
+    }
+    // Old format: single flat object { download, movie, tv, transferType, qbSavePath }
+    if (typeof v.download === 'string' || typeof v.movie === 'string') {
+      const migrated: PathProfile = normalizeProfile({
+        id: 'default',
+        name: '默认',
+        download: v.download as string,
+        qbSavePath: v.qbSavePath as string,
+        movie: v.movie as string,
+        tv: v.tv as string,
+        transferType: v.transferType as TransferMode
+      });
+      return { activeId: 'default', profiles: [migrated] };
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return { activeId: DEFAULT_PROFILE.id, profiles: [DEFAULT_PROFILE] };
+}
+
+/** Look up a specific profile by id (returns normalized or default). */
+export async function loadProfileById(id?: string | null): Promise<PathProfile> {
+  if (!id) return loadPaths();
+  const cfg = await loadPathsConfig();
+  const p = cfg.profiles.find((x) => x.id === id);
+  return p ? normalizeProfile(p) : loadPaths();
 }
 interface Naming {
   movie: string;
   tv: string;
-}
-
-export async function loadPaths(): Promise<Paths> {
-  const row = await prisma.systemConfig.findUnique({ where: { key: 'paths' } });
-  const p = row ? (JSON.parse(row.value) as Paths) : ({} as Paths);
-  const download = p.download || '/downloads';
-  return {
-    download,
-    movie: p.movie || '/media/movies',
-    tv: p.tv || '/media/tv',
-    transferType: (p.transferType as TransferMode) || 'link',
-    qbSavePath: p.qbSavePath || download
-  };
 }
 
 async function loadNaming(): Promise<Naming> {

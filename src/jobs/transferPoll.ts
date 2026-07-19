@@ -1,28 +1,12 @@
 // Poll qBittorrent for completed torrents and run the transfer chain.
 import { prisma } from '@/lib/prisma';
 import { listTorrents } from '@/core/downloader/qbittorrent';
-import { organize, loadPaths } from '@/core/chain/transfer';
+import { organize, loadProfileById } from '@/core/chain/transfer';
 
 const inflight = new Set<string>();
 
-/**
- * Load the qb<->app path mapping from DB. qBittorrent reports save paths in
- * its own filesystem view; organize() runs inside the app container and needs
- * the app-side path. When qb is a sibling docker container the two views
- * coincide (`/downloads`); when qb is a NAS host suite they differ (qb sees
- * `/volume1/qBittorent`, app sees `/downloads` via a volume mount).
- */
-async function loadPathMap(): Promise<{ qb: string; app: string }> {
-  const paths = await loadPaths();
-  return {
-    qb: (paths.qbSavePath || paths.download).replace(/\/$/, ''),
-    app: paths.download.replace(/\/$/, '')
-  };
-}
-
 export async function transferPoll(): Promise<void> {
   const torrents = await listTorrents({ status: 'completed' });
-  const { qb: qbPath, app: appPath } = await loadPathMap();
 
   for (const t of torrents) {
     const hash = t.hash;
@@ -38,13 +22,23 @@ export async function transferPoll(): Promise<void> {
 
     inflight.add(hash);
     try {
+      // Resolve the path profile that was active when this download was
+      // submitted (recorded on DownloadHistory). Using the historical profile
+      // rather than the current active one means switching profiles later
+      // doesn't break organising older downloads that were saved under a
+      // different qb save path / library mapping. Falls back to the active
+      // profile for records submitted before pathProfileId existed.
+      const profile = await loadProfileById(history.pathProfileId);
+      const qbPath = (profile.qbSavePath || profile.download).replace(/\/$/, '');
+      const appPath = profile.download.replace(/\/$/, '');
+
       // qBittorrent reports paths in its own view (qbPath); translate to the
       // app-container view (appPath) so organize() can stat the real files.
       const containerPath = t.contentPath || `${t.savePath.replace(/\/$/, '')}/${t.name}`;
       const hostPath = qbPath && qbPath !== appPath
         ? containerPath.replace(qbPath, appPath)
         : containerPath;
-      console.log(`[transferPoll] organising ${hostPath} (qb: ${containerPath})`);
+      console.log(`[transferPoll] organising ${hostPath} (qb: ${containerPath}) [profile: ${profile.name}]`);
       const result = await organize({
         source: hostPath,
         downloadHash: hash,

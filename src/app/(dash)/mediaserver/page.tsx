@@ -37,7 +37,10 @@ interface JfStatus {
 }
 
 interface AppConfig {
-  paths?: { download?: string; movie?: string; tv?: string };
+  // Multi-profile shape (full), populated from the saved config.
+  paths?: { activeId?: string; profiles?: Array<{ id: string; movie?: string; tv?: string; download?: string }> };
+  // Read-only snapshot of the active profile, injected by GET /api/config.
+  pathsActive?: { download?: string; movie?: string; tv?: string };
 }
 
 export default function MediaServerPage() {
@@ -319,9 +322,9 @@ export default function MediaServerPage() {
     const selectedItems = items.filter((it) => selected.has(it.Id));
     const allMovies = selectedItems.length > 0 && selectedItems.every((it) => it.Type === 'Movie');
     const allSeries = selectedItems.length > 0 && selectedItems.every((it) => it.Type === 'Series');
-    if (allMovies) setMoveDest(config.paths?.movie || '/media/movies');
-    else if (allSeries) setMoveDest(config.paths?.tv || '/media/tv');
-    else setMoveDest(config.paths?.movie || '/media/movies');
+    if (allMovies) setMoveDest(config.pathsActive?.movie || '/media/movies');
+    else if (allSeries) setMoveDest(config.pathsActive?.tv || '/media/tv');
+    else setMoveDest(config.pathsActive?.movie || '/media/movies');
     setMoveOpen(true);
   }
 
@@ -662,22 +665,22 @@ export default function MediaServerPage() {
               className="font-mono"
             />
             <div className="flex flex-wrap gap-2">
-              {config.paths?.movie && (
+              {config.pathsActive?.movie && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setMoveDest(config.paths!.movie!)}
+                  onClick={() => setMoveDest(config.pathsActive!.movie!)}
                 >
-                  <Film className="mr-1 h-3 w-3" />电影库：{config.paths.movie}
+                  <Film className="mr-1 h-3 w-3" />电影库：{config.pathsActive.movie}
                 </Button>
               )}
-              {config.paths?.tv && (
+              {config.pathsActive?.tv && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setMoveDest(config.paths!.tv!)}
+                  onClick={() => setMoveDest(config.pathsActive!.tv!)}
                 >
-                  <Tv className="mr-1 h-3 w-3" />剧集库：{config.paths.tv}
+                  <Tv className="mr-1 h-3 w-3" />剧集库：{config.pathsActive.tv}
                 </Button>
               )}
             </div>

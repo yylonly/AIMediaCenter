@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/api';
 import { prisma } from '@/lib/prisma';
 import { resetTmdbClient } from '@/core/tmdb/client';
 import { resetProxyCache } from '@/lib/proxy';
+import { loadPaths } from '@/core/chain/transfer';
 
 export async function GET(req: NextRequest) {
   const auth = await requireAuth(req);
@@ -15,6 +16,24 @@ export async function GET(req: NextRequest) {
     } catch {
       out[r.key] = r.value;
     }
+  }
+  // Inject a read-only snapshot of the active path profile for consumers
+  // that only need the resolved movie/tv/download paths (mediaserver page
+  // move-to-library, etc) without having to understand the multi-profile
+  // { activeId, profiles[] } shape.
+  try {
+    const active = await loadPaths();
+    out.pathsActive = {
+      id: active.id,
+      name: active.name,
+      download: active.download,
+      qbSavePath: active.qbSavePath,
+      movie: active.movie,
+      tv: active.tv,
+      transferType: active.transferType
+    };
+  } catch {
+    /* paths not configured yet - skip */
   }
   return NextResponse.json(out);
 }
