@@ -134,6 +134,7 @@ interface JfItem {
   ParentId?: string;
   IndexNumber?: number;
   ParentIndexNumber?: number;
+  DateCreated?: string;
 }
 
 interface JfEpisode {
@@ -150,7 +151,7 @@ async function fetchItems(cfg: JellyfinCfg, includeItemTypes: string): Promise<J
   const url = new URL(cfg.url.replace(/\/$/, '') + '/Items');
   url.searchParams.set('IncludeItemTypes', includeItemTypes);
   url.searchParams.set('Recursive', 'true');
-  url.searchParams.set('Fields', 'ProviderIds,Path,OriginalTitle,ProductionYear');
+  url.searchParams.set('Fields', 'ProviderIds,Path,OriginalTitle,ProductionYear,DateCreated');
   const res = await fetch(url.toString(), { headers: authHeaders(cfg.apiKey) });
   if (!res.ok) return [];
   const data = (await res.json()) as { Items?: JfItem[] };
@@ -169,6 +170,7 @@ export async function syncJellyfin(): Promise<{ ok: boolean; synced: number; err
     let synced = 0;
     for (const it of items) {
       const tmdbid = it.ProviderIds?.Tmdb ? Number(it.ProviderIds.Tmdb) : null;
+      const dateAdded = it.DateCreated ? new Date(it.DateCreated) : null;
       await prisma.mediaServerItem.upsert({
         where: { server_itemId: { server: 'jellyfin', itemId: it.Id } },
         update: {
@@ -178,7 +180,8 @@ export async function syncJellyfin(): Promise<{ ok: boolean; synced: number; err
           tmdbid: tmdbid ?? null,
           imdbid: it.ProviderIds?.Imdb ?? null,
           itemType: it.Type,
-          path: it.Path ?? null
+          path: it.Path ?? null,
+          dateAdded
         },
         create: {
           server: 'jellyfin',
@@ -190,7 +193,8 @@ export async function syncJellyfin(): Promise<{ ok: boolean; synced: number; err
           year: it.ProductionYear ? String(it.ProductionYear) : null,
           tmdbid: tmdbid ?? null,
           imdbid: it.ProviderIds?.Imdb ?? null,
-          path: it.Path ?? null
+          path: it.Path ?? null,
+          dateAdded
         }
       });
       synced++;
@@ -224,7 +228,9 @@ export async function listMediaItems(params?: {
       where,
       skip: (page - 1) * pageSize,
       take: pageSize,
-      orderBy: { title: 'asc' }
+      // Newest library additions first; rows without a dateAdded (never
+      // re-synced since the column was added) fall to the end.
+      orderBy: [{ dateAdded: 'desc' }, { id: 'desc' }]
     }),
     prisma.mediaServerItem.count({ where })
   ]);
@@ -237,6 +243,7 @@ export async function listMediaItems(params?: {
       ProductionYear: it.year ? Number(it.year) : undefined,
       Path: it.path ?? undefined,
       ProviderIds: { Tmdb: it.tmdbid ? String(it.tmdbid) : undefined, Imdb: it.imdbid ?? undefined },
+      DateCreated: it.dateAdded?.toISOString(),
       ParentId: undefined
     })),
     total
