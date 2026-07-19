@@ -8,7 +8,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Must be lowercase: docker refs reject uppercase repository names,
+  # and github.repository ("yylonly/AIMediaCenter") contains uppercase.
+  IMAGE_NAME: yylonly/aimediacenter
 
 jobs:
   # Build each architecture on a native runner (no QEMU emulation):
