@@ -3,6 +3,7 @@ import nunjucks from 'nunjucks';
 import type { MetaInfo } from '../meta/types';
 import type { TmdbBrief } from '../tmdb/client';
 import { pad2 } from '@/lib/utils';
+import type { MediaCategory } from './category';
 
 const env = new nunjucks.Environment(null, { autoescape: false });
 env.addFilter('pad2', (v: unknown) => pad2(v == null ? '' : (v as any)));
@@ -43,9 +44,11 @@ export interface RenameCtx {
   fileExt: string;
   tmdbid?: number;
   imdbid?: string;
+  /** Inferred media category slug (e.g. 'chinese-movie', 'jp-anime'). */
+  mediaCategory?: MediaCategory;
 }
 
-export function buildRenameCtx(meta: MetaInfo, media?: TmdbBrief, fileExt = ''): RenameCtx {
+export function buildRenameCtx(meta: MetaInfo, media?: TmdbBrief, fileExt = '', mediaCategory?: MediaCategory): RenameCtx {
   const title = media?.title || meta.title;
   return {
     title: safe(title),
@@ -62,7 +65,8 @@ export function buildRenameCtx(meta: MetaInfo, media?: TmdbBrief, fileExt = ''):
     releaseGroup: meta.resourceTeam,
     fileExt: fileExt || meta.fileExt || '',
     tmdbid: media?.tmdbid,
-    imdbid: media?.imdbid
+    imdbid: media?.imdbid,
+    mediaCategory
   };
 }
 

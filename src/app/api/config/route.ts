@@ -17,20 +17,14 @@ export async function GET(req: NextRequest) {
       out[r.key] = r.value;
     }
   }
-  // Inject a read-only snapshot of the active path profile for consumers
-  // that only need the resolved movie/tv/download paths (mediaserver page
-  // move-to-library, etc) without having to understand the multi-profile
-  // { activeId, profiles[] } shape.
+  // Inject a read-only snapshot of the default movie/tv dirs for consumers
+  // (mediaserver move-to-library) that don't need to understand the rules
+  // array. loadPaths() already migrates legacy configs.
   try {
-    const active = await loadPaths();
+    const paths = await loadPaths();
     out.pathsActive = {
-      id: active.id,
-      name: active.name,
-      download: active.download,
-      qbSavePath: active.qbSavePath,
-      movie: active.movie,
-      tv: active.tv,
-      transferType: active.transferType
+      movie: paths.defaultMovieDir,
+      tv: paths.defaultTvDir
     };
   } catch {
     /* paths not configured yet - skip */

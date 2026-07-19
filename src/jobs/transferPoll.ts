@@ -1,12 +1,13 @@
 // Poll qBittorrent for completed torrents and run the transfer chain.
 import { prisma } from '@/lib/prisma';
 import { listTorrents } from '@/core/downloader/qbittorrent';
-import { organize, loadProfileById } from '@/core/chain/transfer';
+import { organize, loadPaths, loadRuleById } from '@/core/chain/transfer';
 
 const inflight = new Set<string>();
 
 export async function transferPoll(): Promise<void> {
   const torrents = await listTorrents({ status: 'completed' });
+  const pathsCfg = await loadPaths();
 
   for (const t of torrents) {
     const hash = t.hash;
@@ -22,15 +23,17 @@ export async function transferPoll(): Promise<void> {
 
     inflight.add(hash);
     try {
-      // Resolve the path profile that was active when this download was
-      // submitted (recorded on DownloadHistory). Using the historical profile
-      // rather than the current active one means switching profiles later
-      // doesn't break organising older downloads that were saved under a
-      // different qb save path / library mapping. Falls back to the active
-      // profile for records submitted before pathProfileId existed.
-      const profile = await loadProfileById(history.pathProfileId);
-      const qbPath = (profile.qbSavePath || profile.download).replace(/\/$/, '');
-      const appPath = profile.download.replace(/\/$/, '');
+      // Resolve the path rule that was active when this download was
+      // submitted (recorded on DownloadHistory as pathProfileId, repurposed
+      // to store the rule id). Using the historical rule means editing rules
+      // later doesn't break organising older downloads. Falls back to the
+      // current config when no rule id is recorded.
+      const rule = await loadRuleById(history.pathProfileId);
+      // qb-side download dir (qb's own view): the rule's hostDownloadDir, or
+      // the rule's containerDownloadDir when host is empty, or '/downloads'.
+      const qbPath = (rule?.hostDownloadDir || rule?.containerDownloadDir || '/downloads').replace(/\/$/, '');
+      // app-container view of the download dir: the rule's containerDownloadDir.
+      const appPath = (rule?.containerDownloadDir || '/downloads').replace(/\/$/, '');
 
       // qBittorrent reports paths in its own view (qbPath); translate to the
       // app-container view (appPath) so organize() can stat the real files.
@@ -38,7 +41,8 @@ export async function transferPoll(): Promise<void> {
       const hostPath = qbPath && qbPath !== appPath
         ? containerPath.replace(qbPath, appPath)
         : containerPath;
-      console.log(`[transferPoll] organising ${hostPath} (qb: ${containerPath}) [profile: ${profile.name}]`);
+      const ruleName = rule?.name || (pathsCfg.rules.length ? '(规则已删)' : '(默认)');
+      console.log(`[transferPoll] organising ${hostPath} (qb: ${containerPath}) [rule: ${ruleName}]`);
       const result = await organize({
         source: hostPath,
         downloadHash: hash,

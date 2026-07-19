@@ -69,6 +69,14 @@ export interface TmdbBrief {
   vote?: number;
   totalEpisodes?: number;
   seasons?: { season: number; episodeCount: number; airDate?: string }[];
+  /** TMDB genres (id + name). Populated by tmdbDetail; absent on search hits. */
+  genres?: { id: number; name: string }[];
+  /** Genre ids only (search results carry these instead of full genre objects). */
+  genreIds?: number[];
+  /** ISO 3166-1 country codes (e.g. CN, US, JP). */
+  originCountry?: string[];
+  /** ISO 639-1 original language (e.g. zh, ja, en). */
+  originalLanguage?: string;
 }
 
 const IMG = 'https://image.tmdb.org/t/p/original';
@@ -93,7 +101,8 @@ export async function tmdbSearch(query: string, limit = 10): Promise<TmdbBrief[]
         year: (r.release_date || r.first_air_date || '').slice(0, 4) || undefined,
         poster: r.poster_path ? IMG + r.poster_path : undefined,
         backdrop: r.backdrop_path ? IMG + r.backdrop_path : undefined,
-        vote: r.vote_average
+        vote: r.vote_average,
+        genreIds: r.genre_ids
       }));
     cache.set(key, items);
     return items;
@@ -158,7 +167,11 @@ export async function tmdbDetail(
         season: s.season_number,
         episodeCount: s.episode_count,
         airDate: s.air_date || undefined
-      }))
+      })),
+      genres: data.genres?.map((g: any) => ({ id: g.id, name: g.name })),
+      genreIds: data.genres?.map((g: any) => g.id),
+      originCountry: data.origin_country || data.production_countries?.map((c: any) => c.iso_3166_1),
+      originalLanguage: data.original_language
     };
     cache.set(key, brief);
 

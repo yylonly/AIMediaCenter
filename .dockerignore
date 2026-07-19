@@ -1,0 +1,28 @@
+# --- VCS / tooling ---
+.git
+.github
+.vscode
+.idea
+.DS_Store
+
+# --- dependencies & build output (rebuilt inside the image) ---
+node_modules
+.next
+
+# --- secrets (never bake into build context / image layers) ---
+.env
+.env.*
+!.env.example
+
+# --- local runtime data under docker/ ---
+docker/config
+docker/downloads
+docker/media
+docker/jellyfin
+docker/qbittorrent
+
+# --- misc not needed for the image ---
+tests
+deploy
+*.log
+test-qb.mjs

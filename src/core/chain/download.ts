@@ -1,9 +1,10 @@
 // Download orchestration: enclosure → qB → DownloadHistory row.
 import { prisma } from '@/lib/prisma';
 import { addTorrent, getQbConfig } from '@/core/downloader/qbittorrent';
-import { loadPaths } from '@/core/chain/transfer';
+import { loadPaths, matchRule, resolveDownloadDir } from '@/core/chain/transfer';
+import { inferMediaCategory, categoryType, type MediaType } from '@/core/transfer/category';
 import { parseFilename } from '@/core/meta/metaVideo';
-import { tmdbSearch } from '@/core/tmdb/client';
+import { tmdbSearch, tmdbDetail } from '@/core/tmdb/client';
 import type { TorrentInfo } from '@/core/indexer/base';
 import type { TmdbBrief } from '@/core/tmdb/client';
 
@@ -44,18 +45,33 @@ export async function submitDownload(opts: DownloadOptions): Promise<{
   }
 
   // Type detection: TMDB match > filename parser > torrent category > default movie
-  const isTv =
-    media?.type === 'tv' ||
-    (!media?.type && meta.type === 'tv') ||
-    (!media?.type && meta.type === 'unknown' && torrent.category === 'tv');
+  const resolvedType: MediaType = (media?.type || meta.type || (torrent.category === 'tv' ? 'tv' : 'movie')) as MediaType;
+  const isTv = resolvedType === 'tv';
   const category = isTv ? cfg.categoryTv : cfg.categoryMovie;
 
-  // qBittorrent's save path must be in qb's own filesystem view, which
-  // differs from the app's when qb is a host suite (NAS) rather than a
-  // sibling container. `paths.qbSavePath` captures that; it falls back to
-  // `paths.download` for the local-docker stack where the two coincide.
+  // Fetch full TMDB detail (if we have a match) to get genres/origin_country
+  // for category inference; the search hit only carries genre_ids which is
+  // enough, but detail gives the canonical genres too.
+  let detailedMedia = media;
+  if (media?.tmdbid && !media.genres && !media.genreIds) {
+    const d = await tmdbDetail(media.tmdbid, media.type);
+    if (d) detailedMedia = d;
+  }
   const paths = await loadPaths();
-  const savepath = `${(paths.qbSavePath || paths.download).replace(/\/$/, '')}/${isTv ? 'tv' : 'movies'}`;
+  const mediaCategory = inferMediaCategory(
+    resolvedType,
+    detailedMedia?.genreIds || detailedMedia?.genres?.map((g) => g.id) || [],
+    detailedMedia?.originCountry || [],
+    detailedMedia?.originalLanguage
+  );
+  const rule = matchRule(mediaCategory, paths);
+  // qBittorrent save path: use the matched rule's host download dir (qb's
+  // own view), or fall back to /downloads. Subfolder by tv/movies for the
+  // default case to preserve existing qb category layout.
+  const dlBase = resolveDownloadDir(mediaCategory, paths).replace(/\/$/, '');
+  const savepath = rule
+    ? `${dlBase}/${isTv ? 'tv' : 'movies'}`
+    : `${dlBase}/${isTv ? 'tv' : 'movies'}`;
 
   // For private PT sites, attach Cookie/UA/Referer to the .torrent download.
   // The enclosure URL may already carry &passkey= (set by NexusPHP indexer).
@@ -117,10 +133,9 @@ export async function submitDownload(opts: DownloadOptions): Promise<{
       torrentDescription: torrent.description,
       torrentSite: torrent.site,
       username,
-      // Record which path profile was active so transferPoll can later map
-      // qb-side paths back to the app-container view using the same profile,
-      // even if the active profile has since been switched.
-      pathProfileId: paths.id
+      // Record the matched path rule id so transferPoll can later map
+      // qb-side paths back to the app-container view using the same rule.
+      pathProfileId: rule?.id || null
     }
   });
   return { ok: true, hash: add.hash, historyId: history.id };

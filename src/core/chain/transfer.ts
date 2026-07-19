@@ -8,108 +8,144 @@ import { buildRenameCtx, renderPath } from '@/core/transfer/rename';
 import { scrapeMedia } from '@/core/tmdb/scraper';
 import { refreshJellyfin } from '@/core/mediaserver/jellyfin';
 
-export interface PathProfile {
-  /** Unique id (uuid-ish or slug). */
+export interface PathRule {
   id: string;
-  /** Display name, e.g. "NAS 套件" or "Docker 栈". */
+  /** Display name, e.g. "华语电影". Auto-derived from category if blank. */
   name: string;
-  /** App-side view of the download dir (what organize() sees in-container). */
-  download: string;
-  /**
-   * Path as qBittorrent sees its save location. On a docker-compose stack
-   * where qb shares a volume with the app this equals `download` (e.g.
-   * `/downloads`); on NAS deployments where qb is a host suite it's the
-   * host path (e.g. `/volume1/qBittorent`). Empty falls back to `download`.
-   */
-  qbSavePath: string;
-  /** Movie library root (organize destination for movies). */
-  movie: string;
-  /** TV library root (organize destination for tv). */
-  tv: string;
-  /** Transfer mode: link/softlink/copy/move. */
+  /** Target media category for this rule. */
+  category: MediaCategory;
+  /** Transfer mode override for this rule. */
   transferType: TransferMode;
+  /** Container-side media library dir (container deployment). */
+  containerMediaDir: string;
+  /** Host-side media library dir (standalone, or host view for container). */
+  hostMediaDir: string;
+  /** Container-side download dir (container deployment). */
+  containerDownloadDir: string;
+  /** Host-side download dir (standalone, or host view for container). */
+  hostDownloadDir: string;
+  enabled: boolean;
 }
 
 export interface PathsConfig {
-  /** Id of the currently active profile (must exist in `profiles`). */
-  activeId: string;
-  /** All saved profiles. At least one must always exist. */
-  profiles: PathProfile[];
+  /** 'container' = app runs in docker (needs in/out path mapping); 'standalone' = bare-metal/host. */
+  deploymentMode: 'container' | 'standalone';
+  /** Category rules. Empty array => everything falls back to defaults. */
+  rules: PathRule[];
+  /** Fallback movie library dir when no rule matches (host view for standalone). */
+  defaultMovieDir: string;
+  /** Fallback tv library dir when no rule matches (host view for standalone). */
+  defaultTvDir: string;
 }
 
-const DEFAULT_PROFILE: PathProfile = {
-  id: 'default',
-  name: '默认',
-  download: '/downloads',
-  qbSavePath: '',
-  movie: '/media/movies',
-  tv: '/media/tv',
-  transferType: 'link'
+const DEFAULT_PATHS: PathsConfig = {
+  deploymentMode: 'container',
+  rules: [],
+  defaultMovieDir: '/media/movies',
+  defaultTvDir: '/media/tv'
 };
 
-/** Fill missing fields / apply fallbacks (qbSavePath -> download). */
-function normalizeProfile(p: Partial<PathProfile> & { id: string }): PathProfile {
-  const download = p.download || '/downloads';
+/** Coerce a partially-saved rule into a complete one with defaults. */
+function normalizeRule(r: Partial<PathRule> & { id: string }): PathRule {
   return {
-    id: p.id,
-    name: p.name || '未命名',
-    download,
-    qbSavePath: p.qbSavePath || download,
-    movie: p.movie || '/media/movies',
-    tv: p.tv || '/media/tv',
-    transferType: (p.transferType as TransferMode) || 'link'
+    id: r.id,
+    name: r.name || '',
+    category: r.category || 'foreign-movie',
+    transferType: (r.transferType as TransferMode) || 'link',
+    containerMediaDir: r.containerMediaDir || '/media/movies',
+    hostMediaDir: r.hostMediaDir || '/media/movies',
+    containerDownloadDir: r.containerDownloadDir || '/downloads',
+    hostDownloadDir: r.hostDownloadDir || '/downloads',
+    enabled: r.enabled !== false
   };
 }
 
 /**
- * Load the currently active path profile. Backwards-compatible: old single-
- * object configs ({ download, movie, tv, ... } without `profiles`) are
- * auto-wrapped into a single 'default' profile so no DB migration is needed.
+ * Load the full paths config. Backwards-compatible: legacy single-object
+ * configs ({ download, movie, tv, ... }) and the multi-profile shape
+ * ({ activeId, profiles[] }) are auto-migrated to { rules: [], defaultMovieDir,
+ * defaultTvDir } so nothing breaks on upgrade.
  */
-export async function loadPaths(): Promise<PathProfile> {
-  const cfg = await loadPathsConfig();
-  const active = cfg.profiles.find((p) => p.id === cfg.activeId) || cfg.profiles[0];
-  return normalizeProfile(active);
-}
-
-/** Load the full paths config (all profiles + activeId) for UI editing. */
-export async function loadPathsConfig(): Promise<PathsConfig> {
+export async function loadPaths(): Promise<PathsConfig> {
   const row = await prisma.systemConfig.findUnique({ where: { key: 'paths' } });
-  if (!row) return { activeId: DEFAULT_PROFILE.id, profiles: [DEFAULT_PROFILE] };
+  if (!row) return { ...DEFAULT_PATHS };
   try {
-    const v = JSON.parse(row.value) as Partial<PathsConfig> & Record<string, unknown>;
-    // New format: { activeId, profiles[] }
-    if (Array.isArray(v.profiles) && v.profiles.length > 0) {
-      const profiles = v.profiles.map((p) => normalizeProfile(p as PathProfile));
-      const activeId = (v.activeId as string) || profiles[0].id;
-      return { activeId, profiles };
+    const v = JSON.parse(row.value) as Record<string, unknown>;
+    // New shape: { deploymentMode, rules[], defaultMovieDir, defaultTvDir }
+    if (Array.isArray(v.rules)) {
+      return {
+        deploymentMode: v.deploymentMode === 'standalone' ? 'standalone' : 'container',
+        rules: (v.rules as PathRule[]).map(normalizeRule),
+        defaultMovieDir: (v.defaultMovieDir as string) || '/media/movies',
+        defaultTvDir: (v.defaultTvDir as string) || '/media/tv'
+      };
     }
-    // Old format: single flat object { download, movie, tv, transferType, qbSavePath }
-    if (typeof v.download === 'string' || typeof v.movie === 'string') {
-      const migrated: PathProfile = normalizeProfile({
-        id: 'default',
-        name: '默认',
-        download: v.download as string,
-        qbSavePath: v.qbSavePath as string,
-        movie: v.movie as string,
-        tv: v.tv as string,
-        transferType: v.transferType as TransferMode
-      });
-      return { activeId: 'default', profiles: [migrated] };
+    // Legacy multi-profile shape: take the active profile's movie/tv as defaults.
+    if (Array.isArray(v.profiles) && v.profiles.length > 0) {
+      const profiles = v.profiles as Record<string, unknown>[];
+      const activeId = (v.activeId as string) || (profiles[0].id as string);
+      const p = profiles.find((x) => x.id === activeId) || profiles[0];
+      return {
+        deploymentMode: 'container',
+        rules: [],
+        defaultMovieDir: (p.movie as string) || '/media/movies',
+        defaultTvDir: (p.tv as string) || '/media/tv'
+      };
+    }
+    // Legacy flat shape: { download, movie, tv, transferType, qbSavePath }
+    if (typeof v.movie === 'string' || typeof v.tv === 'string') {
+      return {
+        deploymentMode: 'container',
+        rules: [],
+        defaultMovieDir: (v.movie as string) || '/media/movies',
+        defaultTvDir: (v.tv as string) || '/media/tv'
+      };
     }
   } catch {
     /* fall through to default */
   }
-  return { activeId: DEFAULT_PROFILE.id, profiles: [DEFAULT_PROFILE] };
+  return { ...DEFAULT_PATHS };
 }
 
-/** Look up a specific profile by id (returns normalized or default). */
-export async function loadProfileById(id?: string | null): Promise<PathProfile> {
-  if (!id) return loadPaths();
-  const cfg = await loadPathsConfig();
-  const p = cfg.profiles.find((x) => x.id === id);
-  return p ? normalizeProfile(p) : loadPaths();
+/** Find the enabled rule matching a category (or null). */
+export function matchRule(category: MediaCategory, cfg: PathsConfig): PathRule | null {
+  return cfg.rules.find((r) => r.enabled && r.category === category) || null;
 }
+
+/**
+ * Resolve the library dir + transfer mode for a category. Container mode
+ * reads the rule's in-container media dir; standalone reads the host media
+ * dir. Falls back to defaultMovieDir/defaultTvDir when no rule matches.
+ */
+export function resolveLibraryDir(
+  category: MediaCategory,
+  cfg: PathsConfig
+): { dir: string; mode: TransferMode } {
+  const rule = matchRule(category, cfg);
+  const type = categoryType(category);
+  const defaultDir = type === 'movie' ? cfg.defaultMovieDir : cfg.defaultTvDir;
+  if (!rule) return { dir: defaultDir, mode: 'link' };
+  const dir = cfg.deploymentMode === 'container' ? rule.containerMediaDir : rule.hostMediaDir;
+  return { dir, mode: rule.transferType };
+}
+
+/**
+ * Resolve the download dir that qBittorrent should save into, for a category.
+ * qb always operates on its own (host) view; falls back to container dir.
+ */
+export function resolveDownloadDir(category: MediaCategory, cfg: PathsConfig): string {
+  const rule = matchRule(category, cfg);
+  if (!rule) return '/downloads';
+  return rule.hostDownloadDir || rule.containerDownloadDir || '/downloads';
+}
+
+/** Look up a rule by id (for transferPoll to reuse the historical rule). */
+export async function loadRuleById(id?: string | null): Promise<PathRule | null> {
+  if (!id) return null;
+  const cfg = await loadPaths();
+  return cfg.rules.find((r) => r.id === id) || null;
+}
+
 interface Naming {
   movie: string;
   tv: string;
@@ -165,7 +201,6 @@ export async function organize(opts: TransferOptions): Promise<{
 }> {
   const paths = await loadPaths();
   const naming = await loadNaming();
-  const mode = opts.mode || paths.transferType;
   const errors: string[] = [];
   let transferred = 0;
 
@@ -183,11 +218,20 @@ export async function organize(opts: TransferOptions): Promise<{
       const filename = path.basename(src);
       const { meta, media } = await recognizeMedia(filename);
       // Type priority: caller-supplied mtype > TMDB match > filename parser > default movie
-      const resolvedType = opts.mtype || media?.type || meta.type;
+      const resolvedType: MediaType = (opts.mtype || media?.type || meta.type) as MediaType;
       const isTv = resolvedType === 'tv';
-      const libRoot = isTv ? paths.tv : paths.movie;
+      // Infer media category from TMDB metadata, then resolve the library
+      // dir + transfer mode from the matching PathRule (or defaults).
+      const category = inferMediaCategory(
+        resolvedType,
+        media?.genreIds || media?.genres?.map((g) => g.id) || [],
+        media?.originCountry || [],
+        media?.originalLanguage
+      );
+      const { dir: libRoot, mode: ruleMode } = resolveLibraryDir(category, paths);
+      const mode = opts.mode || ruleMode;
       const template = isTv ? naming.tv : naming.movie;
-      const ctx = buildRenameCtx(meta, media, path.extname(src));
+      const ctx = buildRenameCtx(meta, media, path.extname(src), category);
       const rel = renderPath(template, ctx);
       const dest = path.join(libRoot, rel);
       await transferFile(src, dest, mode);
