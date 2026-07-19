@@ -190,7 +190,7 @@ model MediaServerItem {
   path          String?
   seasoninfo    String?
   note          String?
-  /** When the item was added to the Jellyfin library (DateCreated from sync). */
+  /// When the item was added to the Jellyfin library (DateCreated from sync).
   dateAdded     DateTime?
   lstModDate    DateTime @default(now()) @updatedAt
 
