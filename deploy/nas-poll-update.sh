@@ -1,9 +1,12 @@
 #!/usr/bin/env sh
 # NAS-side auto-update poller for AIMediaCenter.
 #
-# Queries the GHCR registry for the current digest of the `latest` tag and
-# redeploys via `docker compose` when it changes. Public images are queryable
-# anonymously, so no token/credentials are needed on the NAS.
+# Two jobs per run:
+#   a) Apply pending container-rebuild requests (path roots edited in the app
+#      settings are dropped as config/deploy/restart-request.json).
+#   b) Query the registry for the current digest of the `latest` tag and
+#      redeploy via `docker compose` when it changes. Public images are
+#      queryable anonymously, so no token/credentials are needed on the NAS.
 #
 # Install (DSM): Control Panel -> Task Scheduler -> Create -> Scheduled Task ->
 # User-defined script, run as root every 5 minutes:
@@ -28,6 +31,35 @@ DIGEST_FILE="${DEPLOY_DIR}/.last-digest"
 REGISTRY="${REGISTRY:-ghcr.io}"
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"; }
+
+# 0. Apply any pending container-rebuild request from the app. When the path
+#    roots are edited in settings, the app drops restart-request.json into
+#    config/deploy; we rewrite the matching vars in .env and recreate the
+#    container with the new mounts.
+REQ_FILE="${DEPLOY_DIR}/config/deploy/restart-request.json"
+if [ -f "$REQ_FILE" ]; then
+  log "Restart request found; applying new path roots to .env"
+  changed=0
+  for key in HOST_MEDIA_ROOT HOST_DOWNLOAD_ROOT CONTAINER_MEDIA_ROOT CONTAINER_DOWNLOAD_ROOT; do
+    val=$(sed -n "s/.*\"${key}\":\"\\([^\"]*\\)\".*/\\1/p" "$REQ_FILE")
+    [ -z "$val" ] && continue
+    if grep -q "^${key}=" "${DEPLOY_DIR}/.env" 2>/dev/null; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "${DEPLOY_DIR}/.env"
+    else
+      printf '%s=%s\n' "$key" "$val" >> "${DEPLOY_DIR}/.env"
+    fi
+    changed=1
+  done
+  rm -f "$REQ_FILE"
+  if [ "$changed" = "1" ]; then
+    cd "$DEPLOY_DIR"
+    if docker compose up -d; then
+      log "Container recreated with new path roots."
+    else
+      log "ERROR: docker compose up failed while applying restart request"
+    fi
+  fi
+fi
 
 # 1. Try to fetch an anonymous bearer token. ghcr.io requires one; some
 #    mirrors don't implement /token at all and allow unauthenticated pulls,

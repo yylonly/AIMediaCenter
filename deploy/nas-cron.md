@@ -73,6 +73,22 @@ NAS 每 5 分钟 poll GHCR digest ──┐
 - 镜像为 public，NAS 匿名拉取，无需登录或 token
 - `.env` 留在 NAS 本地，不进仓库、不进镜像
 - 最多 5 分钟延迟感知到新版本
+- ghcr.io 直连慢时可用镜像站：`REGISTRY=ghcr.nju.edu.cn bash nas-poll-update.sh`
+  （compose 里的 image 也要改成同一镜像站前缀）
+
+## 3.1 应用内「重建容器」
+
+设置页修改公共根目录（`HOST_MEDIA_ROOT` 等）后点「立即重建容器」，应用会把
+目标根目录写入 `config/deploy/restart-request.json`。轮询脚本下次运行时
+（最多 5 分钟）把新值写进 `.env` 并 `docker compose up -d`，容器以新挂载重建。
+
+想立即生效可手动跑一次：
+
+```sh
+REGISTRY=ghcr.nju.edu.cn bash /volume1/docker/aimediacenter/nas-poll-update.sh
+```
+
+分类规则的子目录在公共根目录之下，增改子目录**即时生效**，不需要重建。
 
 ## 4. 验证
 

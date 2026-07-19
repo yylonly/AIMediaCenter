@@ -1,7 +1,7 @@
 // Poll qBittorrent for completed torrents and run the transfer chain.
 import { prisma } from '@/lib/prisma';
 import { listTorrents } from '@/core/downloader/qbittorrent';
-import { organize, loadPaths, loadRuleById } from '@/core/chain/transfer';
+import { organize, loadPaths, loadRuleById, resolveDownloadDirs } from '@/core/chain/transfer';
 
 const inflight = new Set<string>();
 
@@ -29,11 +29,11 @@ export async function transferPoll(): Promise<void> {
       // later doesn't break organising older downloads. Falls back to the
       // current config when no rule id is recorded.
       const rule = await loadRuleById(history.pathProfileId);
-      // qb-side download dir (qb's own view): the rule's hostDownloadDir, or
-      // the rule's containerDownloadDir when host is empty, or '/downloads'.
-      const qbPath = (rule?.hostDownloadDir || rule?.containerDownloadDir || '/downloads').replace(/\/$/, '');
-      // app-container view of the download dir: the rule's containerDownloadDir.
-      const appPath = (rule?.containerDownloadDir || '/downloads').replace(/\/$/, '');
+      // qb-side download dir (qb's own host view) and the app-container view
+      // of the same dir, both resolved from the common roots + rule subdir.
+      const { qbDir, appDir } = resolveDownloadDirs(rule, pathsCfg);
+      const qbPath = qbDir.replace(/\/$/, '');
+      const appPath = appDir.replace(/\/$/, '');
 
       // qBittorrent reports paths in its own view (qbPath); translate to the
       // app-container view (appPath) so organize() can stat the real files.

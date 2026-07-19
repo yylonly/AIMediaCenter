@@ -17,69 +17,104 @@ export interface PathRule {
   category: MediaCategory;
   /** Transfer mode override for this rule. */
   transferType: TransferMode;
-  /** Container-side media library dir (container deployment). */
-  containerMediaDir: string;
-  /** Host-side media library dir (standalone, or host view for container). */
-  hostMediaDir: string;
-  /** Container-side download dir (container deployment). */
-  containerDownloadDir: string;
-  /** Host-side download dir (standalone, or host view for container). */
-  hostDownloadDir: string;
+  /**
+   * Media library subdir for this category. Relative paths are joined under
+   * the media root; absolute paths are used as-is (escape hatch for rules
+   * living outside the common roots, and for migrated legacy configs).
+   */
+  mediaSubdir: string;
+  /** Download subdir for this category (same relative/absolute rule). */
+  downloadSubdir: string;
   enabled: boolean;
 }
 
 export interface PathsConfig {
   /** 'container' = app runs in docker (needs in/out path mapping); 'standalone' = bare-metal/host. */
   deploymentMode: 'container' | 'standalone';
+  /** Common media library root (container view). Changing it requires a container rebuild. */
+  containerMediaRoot: string;
+  /** Common media library root (host view; the only view in standalone mode). */
+  hostMediaRoot: string;
+  /** Common download root (container view). */
+  containerDownloadRoot: string;
+  /** Common download root (host view; what qBittorrent sees). */
+  hostDownloadRoot: string;
   /** Category rules. Empty array => everything falls back to defaults. */
   rules: PathRule[];
-  /** Fallback movie library dir when no rule matches (host view for standalone). */
-  defaultMovieDir: string;
-  /** Fallback tv library dir when no rule matches (host view for standalone). */
-  defaultTvDir: string;
+  /** Fallback movie library subdir when no rule matches. */
+  defaultMovieSubdir: string;
+  /** Fallback tv library subdir when no rule matches. */
+  defaultTvSubdir: string;
 }
 
 const DEFAULT_PATHS: PathsConfig = {
   deploymentMode: 'container',
+  containerMediaRoot: process.env.CONTAINER_MEDIA_ROOT || '/media',
+  hostMediaRoot: process.env.HOST_MEDIA_ROOT || process.env.CONTAINER_MEDIA_ROOT || '/media',
+  containerDownloadRoot: process.env.CONTAINER_DOWNLOAD_ROOT || '/downloads',
+  hostDownloadRoot: process.env.HOST_DOWNLOAD_ROOT || process.env.CONTAINER_DOWNLOAD_ROOT || '/downloads',
   rules: [],
-  defaultMovieDir: '/media/movies',
-  defaultTvDir: '/media/tv'
+  defaultMovieSubdir: 'movies',
+  defaultTvSubdir: 'tv'
 };
 
-/** Coerce a partially-saved rule into a complete one with defaults. */
-function normalizeRule(r: Partial<PathRule> & { id: string }): PathRule {
+/** Join a (possibly absolute) subdir onto a root. */
+function resolveUnder(root: string, sub: string): string {
+  if (!sub) return root;
+  return sub.startsWith('/') ? sub : path.posix.join(root, sub);
+}
+
+/** Strip a root prefix from a legacy full path ('/media/movies' -> 'movies'). */
+function stripRoot(p: string, root: string): string {
+  if (p === root) return '';
+  if (p.startsWith(root + '/')) return p.slice(root.length + 1);
+  return p;
+}
+
+/** Coerce a partially-saved (or legacy 4-dir) rule into the subdir shape. */
+function normalizeRule(
+  r: Partial<PathRule> & { id: string; containerMediaDir?: string; containerDownloadDir?: string }
+): PathRule {
   return {
     id: r.id,
     name: r.name || '',
     category: r.category || 'foreign-movie',
     transferType: (r.transferType as TransferMode) || 'link',
-    containerMediaDir: r.containerMediaDir || '/media/movies',
-    hostMediaDir: r.hostMediaDir || '/media/movies',
-    containerDownloadDir: r.containerDownloadDir || '/downloads',
-    hostDownloadDir: r.hostDownloadDir || '/downloads',
+    mediaSubdir:
+      r.mediaSubdir ?? stripRoot(r.containerMediaDir || '/media/movies', '/media'),
+    downloadSubdir:
+      r.downloadSubdir ?? stripRoot(r.containerDownloadDir || '/downloads', '/downloads'),
     enabled: r.enabled !== false
   };
 }
 
 /**
- * Load the full paths config. Backwards-compatible: legacy single-object
+ * Load the full paths config. Backwards-compatible: the previous 4-dir rule
+ * shape ({ rules: [{ containerMediaDir, ... }] }), legacy single-object
  * configs ({ download, movie, tv, ... }) and the multi-profile shape
- * ({ activeId, profiles[] }) are auto-migrated to { rules: [], defaultMovieDir,
- * defaultTvDir } so nothing breaks on upgrade.
+ * ({ activeId, profiles[] }) are auto-migrated to the root+subdir model so
+ * nothing breaks on upgrade.
  */
 export async function loadPaths(): Promise<PathsConfig> {
   const row = await prisma.systemConfig.findUnique({ where: { key: 'paths' } });
   if (!row) return { ...DEFAULT_PATHS };
+  const roots = (v: Record<string, unknown>): Omit<PathsConfig, 'rules'> => ({
+    deploymentMode: v.deploymentMode === 'standalone' ? 'standalone' : 'container',
+    containerMediaRoot: (v.containerMediaRoot as string) || DEFAULT_PATHS.containerMediaRoot,
+    hostMediaRoot: (v.hostMediaRoot as string) || DEFAULT_PATHS.hostMediaRoot,
+    containerDownloadRoot: (v.containerDownloadRoot as string) || DEFAULT_PATHS.containerDownloadRoot,
+    hostDownloadRoot: (v.hostDownloadRoot as string) || DEFAULT_PATHS.hostDownloadRoot,
+    defaultMovieSubdir:
+      (v.defaultMovieSubdir as string) ??
+      stripRoot((v.defaultMovieDir as string) || '/media/movies', '/media'),
+    defaultTvSubdir:
+      (v.defaultTvSubdir as string) ?? stripRoot((v.defaultTvDir as string) || '/media/tv', '/media')
+  });
   try {
     const v = JSON.parse(row.value) as Record<string, unknown>;
-    // New shape: { deploymentMode, rules[], defaultMovieDir, defaultTvDir }
+    // Current & previous shapes: { deploymentMode, rules[], ... }
     if (Array.isArray(v.rules)) {
-      return {
-        deploymentMode: v.deploymentMode === 'standalone' ? 'standalone' : 'container',
-        rules: (v.rules as PathRule[]).map(normalizeRule),
-        defaultMovieDir: (v.defaultMovieDir as string) || '/media/movies',
-        defaultTvDir: (v.defaultTvDir as string) || '/media/tv'
-      };
+      return { ...roots(v), rules: (v.rules as PathRule[]).map(normalizeRule) };
     }
     // Legacy multi-profile shape: take the active profile's movie/tv as defaults.
     if (Array.isArray(v.profiles) && v.profiles.length > 0) {
@@ -87,19 +122,19 @@ export async function loadPaths(): Promise<PathsConfig> {
       const activeId = (v.activeId as string) || (profiles[0].id as string);
       const p = profiles.find((x) => x.id === activeId) || profiles[0];
       return {
-        deploymentMode: 'container',
-        rules: [],
-        defaultMovieDir: (p.movie as string) || '/media/movies',
-        defaultTvDir: (p.tv as string) || '/media/tv'
+        ...roots({}),
+        defaultMovieSubdir: stripRoot((p.movie as string) || '/media/movies', '/media'),
+        defaultTvSubdir: stripRoot((p.tv as string) || '/media/tv', '/media'),
+        rules: []
       };
     }
     // Legacy flat shape: { download, movie, tv, transferType, qbSavePath }
     if (typeof v.movie === 'string' || typeof v.tv === 'string') {
       return {
-        deploymentMode: 'container',
-        rules: [],
-        defaultMovieDir: (v.movie as string) || '/media/movies',
-        defaultTvDir: (v.tv as string) || '/media/tv'
+        ...roots({}),
+        defaultMovieSubdir: stripRoot((v.movie as string) || '/media/movies', '/media'),
+        defaultTvSubdir: stripRoot((v.tv as string) || '/media/tv', '/media'),
+        rules: []
       };
     }
   } catch {
@@ -115,29 +150,42 @@ export function matchRule(category: MediaCategory, cfg: PathsConfig): PathRule |
 
 /**
  * Resolve the library dir + transfer mode for a category. Container mode
- * reads the rule's in-container media dir; standalone reads the host media
- * dir. Falls back to defaultMovieDir/defaultTvDir when no rule matches.
+ * resolves under the in-container media root; standalone under the host
+ * root. Falls back to the default movie/tv subdir when no rule matches.
  */
 export function resolveLibraryDir(
   category: MediaCategory,
   cfg: PathsConfig
 ): { dir: string; mode: TransferMode } {
   const rule = matchRule(category, cfg);
-  const type = categoryType(category);
-  const defaultDir = type === 'movie' ? cfg.defaultMovieDir : cfg.defaultTvDir;
-  if (!rule) return { dir: defaultDir, mode: 'link' };
-  const dir = cfg.deploymentMode === 'container' ? rule.containerMediaDir : rule.hostMediaDir;
-  return { dir, mode: rule.transferType };
+  const root = cfg.deploymentMode === 'container' ? cfg.containerMediaRoot : cfg.hostMediaRoot;
+  if (rule) return { dir: resolveUnder(root, rule.mediaSubdir), mode: rule.transferType };
+  const sub = categoryType(category) === 'movie' ? cfg.defaultMovieSubdir : cfg.defaultTvSubdir;
+  return { dir: resolveUnder(root, sub), mode: 'link' };
+}
+
+/**
+ * Resolve both views of a rule's download dir: the qb (host) view and the
+ * app view (container root in container mode, host root in standalone).
+ */
+export function resolveDownloadDirs(
+  rule: PathRule | null,
+  cfg: PathsConfig
+): { qbDir: string; appDir: string } {
+  const sub = rule?.downloadSubdir || '';
+  const appRoot = cfg.deploymentMode === 'container' ? cfg.containerDownloadRoot : cfg.hostDownloadRoot;
+  return {
+    qbDir: resolveUnder(cfg.hostDownloadRoot, sub),
+    appDir: resolveUnder(appRoot, sub)
+  };
 }
 
 /**
  * Resolve the download dir that qBittorrent should save into, for a category.
- * qb always operates on its own (host) view; falls back to container dir.
+ * qb always operates on its own (host) view.
  */
 export function resolveDownloadDir(category: MediaCategory, cfg: PathsConfig): string {
-  const rule = matchRule(category, cfg);
-  if (!rule) return '/downloads';
-  return rule.hostDownloadDir || rule.containerDownloadDir || '/downloads';
+  return resolveDownloadDirs(matchRule(category, cfg), cfg).qbDir;
 }
 
 /** Look up a rule by id (for transferPoll to reuse the historical rule). */

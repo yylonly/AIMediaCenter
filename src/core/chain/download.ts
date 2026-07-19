@@ -65,13 +65,10 @@ export async function submitDownload(opts: DownloadOptions): Promise<{
     detailedMedia?.originalLanguage
   );
   const rule = matchRule(mediaCategory, paths);
-  // qBittorrent save path: use the matched rule's host download dir (qb's
-  // own view), or fall back to /downloads. Subfolder by tv/movies for the
-  // default case to preserve existing qb category layout.
-  const dlBase = resolveDownloadDir(mediaCategory, paths).replace(/\/$/, '');
-  const savepath = rule
-    ? `${dlBase}/${isTv ? 'tv' : 'movies'}`
-    : `${dlBase}/${isTv ? 'tv' : 'movies'}`;
+  // qBittorrent save path: the matched rule's host-view download dir (qb's
+  // own view). The rule's downloadSubdir carries the category layout; with
+  // no rule this is simply the host download root.
+  const savepath = resolveDownloadDir(mediaCategory, paths).replace(/\/$/, '');
 
   // For private PT sites, attach Cookie/UA/Referer to the .torrent download.
   // The enclosure URL may already carry &passkey= (set by NexusPHP indexer).

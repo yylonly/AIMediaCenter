@@ -133,18 +133,18 @@ async function main() {
         '{{title}} ({{year}})/Season {{season}}/{{title}} - S{{season | pad2}}E{{episode | pad2}}{{fileExt}}'
     },
     paths: {
-      activeId: 'default',
-      profiles: [
-        {
-          id: 'default',
-          name: '默认',
-          download: process.env.DOWNLOAD_DIR || '/downloads',
-          movie: process.env.LIBRARY_DIR_MOVIE || '/media/movies',
-          tv: process.env.LIBRARY_DIR_TV || '/media/tv',
-          transferType: process.env.TRANSFER_TYPE || 'link',
-          qbSavePath: process.env.QB_SAVE_PATH || ''
-        }
-      ]
+      deploymentMode: 'container',
+      containerMediaRoot: process.env.CONTAINER_MEDIA_ROOT || '/media',
+      hostMediaRoot:
+        process.env.HOST_MEDIA_ROOT || process.env.CONTAINER_MEDIA_ROOT || '/media',
+      containerDownloadRoot: process.env.CONTAINER_DOWNLOAD_ROOT || '/downloads',
+      hostDownloadRoot:
+        process.env.HOST_DOWNLOAD_ROOT || process.env.CONTAINER_DOWNLOAD_ROOT || '/downloads',
+      rules: [],
+      // Legacy LIBRARY_DIR_* env vars are container-view full paths; keep
+      // their last segment as the default subdir ('/media/movies' -> 'movies').
+      defaultMovieSubdir: (process.env.LIBRARY_DIR_MOVIE || '/media/movies').split('/').filter(Boolean).pop() || 'movies',
+      defaultTvSubdir: (process.env.LIBRARY_DIR_TV || '/media/tv').split('/').filter(Boolean).pop() || 'tv'
     },
     qb: {
       url: process.env.QB_URL || 'http://127.0.0.1:8080',

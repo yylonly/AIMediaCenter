@@ -16,17 +16,28 @@ interface PathRule {
   name: string;
   category: MediaCategory;
   transferType: string;
-  containerMediaDir: string;
-  hostMediaDir: string;
-  containerDownloadDir: string;
-  hostDownloadDir: string;
+  /** Media library subdir (relative => under the media root; absolute => as-is). */
+  mediaSubdir: string;
+  /** Download subdir (same relative/absolute rule). */
+  downloadSubdir: string;
   enabled: boolean;
 }
 interface PathsCfg {
   deploymentMode: 'container' | 'standalone';
+  containerMediaRoot: string;
+  hostMediaRoot: string;
+  containerDownloadRoot: string;
+  hostDownloadRoot: string;
   rules: PathRule[];
-  defaultMovieDir: string;
-  defaultTvDir: string;
+  defaultMovieSubdir: string;
+  defaultTvSubdir: string;
+}
+
+interface ActiveRoots {
+  hostMediaRoot: string;
+  hostDownloadRoot: string;
+  containerMediaRoot: string;
+  containerDownloadRoot: string;
 }
 
 interface Cfg {
@@ -58,7 +69,16 @@ const EMPTY: Cfg = {
   tmdb: { apiKey: '' },
   qb: { url: '', username: '', password: '', categoryMovie: 'movies', categoryTv: 'tv' },
   jellyfin: { url: '', apiKey: '' },
-  paths: { deploymentMode: 'container', rules: [], defaultMovieDir: '/media/movies', defaultTvDir: '/media/tv' },
+  paths: {
+    deploymentMode: 'container',
+    containerMediaRoot: '/media',
+    hostMediaRoot: '/media',
+    containerDownloadRoot: '/downloads',
+    hostDownloadRoot: '/downloads',
+    rules: [],
+    defaultMovieSubdir: 'movies',
+    defaultTvSubdir: 'tv'
+  },
   naming: { movie: '', tv: '' },
   proxy: {
     enabled: false,
@@ -70,7 +90,9 @@ const EMPTY: Cfg = {
 
 export default function SettingsPage() {
   const [cfg, setCfg] = useState<Cfg>(EMPTY);
+  const [activeRoots, setActiveRoots] = useState<ActiveRoots | null>(null);
   const [loading, setLoading] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,55 +106,67 @@ export default function SettingsPage() {
         return r.json();
       })
       .then((d) => {
+        // activeRoots / pathsActive are server-computed snapshots, not
+        // editable config — keep them out of the form state so they don't
+        // get written back on save.
+        const { activeRoots: ar, pathsActive, ...rest } = d;
+        if (ar && ar.containerMediaRoot) setActiveRoots(ar);
         // Deep-merge proxy so configs saved before new fields existed still
         // pick up the defaults (e.g. `global` added later).
-        // Migrate old paths shapes (flat / multi-profile) to the new
-        // { deploymentMode, rules[], defaultMovieDir, defaultTvDir } shape.
-        const rawPaths = d.paths || {};
+        // Migrate old paths shapes (4-dir rules / multi-profile / flat) to
+        // the root + subdir model.
+        const rawPaths = rest.paths || {};
+        const stripRoot = (p: string, root: string): string =>
+          p === root ? '' : p.startsWith(root + '/') ? p.slice(root.length + 1) : p;
+        const rootsOf = (v: Record<string, any>): Omit<PathsCfg, 'rules'> => ({
+          deploymentMode: v.deploymentMode === 'standalone' ? 'standalone' : 'container',
+          containerMediaRoot: v.containerMediaRoot || '/media',
+          hostMediaRoot: v.hostMediaRoot || ar?.hostMediaRoot || '/media',
+          containerDownloadRoot: v.containerDownloadRoot || '/downloads',
+          hostDownloadRoot: v.hostDownloadRoot || ar?.hostDownloadRoot || '/downloads',
+          defaultMovieSubdir: v.defaultMovieSubdir ?? stripRoot(v.defaultMovieDir || '/media/movies', '/media'),
+          defaultTvSubdir: v.defaultTvSubdir ?? stripRoot(v.defaultTvDir || '/media/tv', '/media')
+        });
         let paths: PathsCfg;
         if (Array.isArray(rawPaths.rules)) {
-          // New shape.
+          // Current shape (subdir rules) or previous 4-dir rules shape.
           paths = {
-            deploymentMode: rawPaths.deploymentMode === 'standalone' ? 'standalone' : 'container',
-            rules: rawPaths.rules.map((r: Partial<PathRule>) => ({
+            ...rootsOf(rawPaths),
+            rules: rawPaths.rules.map((r: any) => ({
               id: r.id || 'r_' + Math.random().toString(36).slice(2, 8),
               name: r.name || '',
               category: r.category || 'foreign-movie',
               transferType: r.transferType || 'link',
-              containerMediaDir: r.containerMediaDir || '/media/movies',
-              hostMediaDir: r.hostMediaDir || '/media/movies',
-              containerDownloadDir: r.containerDownloadDir || '/downloads',
-              hostDownloadDir: r.hostDownloadDir || '/downloads',
+              mediaSubdir: r.mediaSubdir ?? stripRoot(r.containerMediaDir || '/media/movies', '/media'),
+              downloadSubdir: r.downloadSubdir ?? stripRoot(r.containerDownloadDir || '/downloads', '/downloads'),
               enabled: r.enabled !== false
-            })),
-            defaultMovieDir: rawPaths.defaultMovieDir || '/media/movies',
-            defaultTvDir: rawPaths.defaultTvDir || '/media/tv'
+            }))
           };
         } else if (Array.isArray(rawPaths.profiles) && rawPaths.profiles.length > 0) {
           // Legacy multi-profile: take active profile's movie/tv as defaults.
           const prof = rawPaths.profiles.find((p: any) => p.id === rawPaths.activeId) || rawPaths.profiles[0];
           paths = {
-            deploymentMode: 'container',
+            ...rootsOf({}),
             rules: [],
-            defaultMovieDir: prof.movie || '/media/movies',
-            defaultTvDir: prof.tv || '/media/tv'
+            defaultMovieSubdir: stripRoot(prof.movie || '/media/movies', '/media'),
+            defaultTvSubdir: stripRoot(prof.tv || '/media/tv', '/media')
           };
         } else if (rawPaths.movie || rawPaths.tv) {
           // Legacy flat shape.
           paths = {
-            deploymentMode: 'container',
+            ...rootsOf({}),
             rules: [],
-            defaultMovieDir: rawPaths.movie || '/media/movies',
-            defaultTvDir: rawPaths.tv || '/media/tv'
+            defaultMovieSubdir: stripRoot(rawPaths.movie || '/media/movies', '/media'),
+            defaultTvSubdir: stripRoot(rawPaths.tv || '/media/tv', '/media')
           };
         } else {
-          paths = { ...EMPTY.paths };
+          paths = { ...EMPTY.paths, ...rootsOf({}), rules: [] };
         }
         setCfg({
           ...EMPTY,
-          ...d,
+          ...rest,
           paths,
-          proxy: { ...EMPTY.proxy, ...(d.proxy || {}) }
+          proxy: { ...EMPTY.proxy, ...(rest.proxy || {}) }
         });
         setLoadError(null);
       })
@@ -293,10 +327,8 @@ export default function SettingsPage() {
       name: '',
       category: 'foreign-movie',
       transferType: 'link',
-      containerMediaDir: '/media/movies',
-      hostMediaDir: '/media/movies',
-      containerDownloadDir: '/downloads',
-      hostDownloadDir: '/downloads',
+      mediaSubdir: '',
+      downloadSubdir: '',
       enabled: true
     };
     setCfg({ ...cfg, paths: { ...cfg.paths, rules: [...cfg.paths.rules, r] } });
@@ -308,6 +340,38 @@ export default function SettingsPage() {
 
   function updatePathsConfig(patch: Partial<PathsCfg>) {
     setCfg({ ...cfg, paths: { ...cfg.paths, ...patch } });
+  }
+
+  // ---- Path root helpers ----
+  /** Join a (possibly absolute) subdir onto a root, mirroring the server. */
+  const joinRoot = (root: string, sub: string): string =>
+    !sub ? root : sub.startsWith('/') ? sub : `${root.replace(/\/$/, '')}/${sub}`;
+
+  /** Desired (form) roots differ from the roots the container was started with. */
+  const rootsDiffer =
+    cfg.paths.deploymentMode === 'container' &&
+    !!activeRoots &&
+    (cfg.paths.hostMediaRoot !== activeRoots.hostMediaRoot ||
+      cfg.paths.hostDownloadRoot !== activeRoots.hostDownloadRoot ||
+      cfg.paths.containerMediaRoot !== activeRoots.containerMediaRoot ||
+      cfg.paths.containerDownloadRoot !== activeRoots.containerDownloadRoot);
+
+  async function rebuildContainer() {
+    setRestarting(true);
+    try {
+      // Persist first: the restart request is built server-side from the DB.
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg)
+      });
+      const r = await fetch('/api/system/restart', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) toast.success(d.message || '重建请求已提交，容器将在几分钟内以新路径重启');
+      else toast.error(d.error || '重建请求失败');
+    } finally {
+      setRestarting(false);
+    }
   }
 
   const field = (label: string, input: React.ReactNode) => (
@@ -450,16 +514,45 @@ export default function SettingsPage() {
               value={cfg.paths.deploymentMode}
               onChange={(e) => updatePathsConfig({ deploymentMode: e.target.value as 'container' | 'standalone' })}
             >
-              <option value="container">容器部署（app 在 docker，需容器内/外两套目录）</option>
-              <option value="standalone">独立部署（app 直接装在宿主，只需一套目录）</option>
+              <option value="container">容器部署（app 在 docker，需容器内/外两套根目录）</option>
+              <option value="standalone">独立部署（app 直接装在宿主，只需一套根目录）</option>
             </select>
           )}
 
-          {/* Default fallback dirs */}
+          {/* Common roots */}
           <div className="rounded-md border p-3 space-y-2 bg-muted/30">
-            <p className="text-sm font-medium">默认目录（匹配不到规则时用）</p>
-            {field('默认电影库', <Input value={cfg.paths.defaultMovieDir} onChange={(e) => updatePathsConfig({ defaultMovieDir: e.target.value })} placeholder="/media/movies" />)}
-            {field('默认剧集库', <Input value={cfg.paths.defaultTvDir} onChange={(e) => updatePathsConfig({ defaultTvDir: e.target.value })} placeholder="/media/tv" />)}
+            <p className="text-sm font-medium">公共根目录（所有分类规则的共同前缀）</p>
+            {cfg.paths.deploymentMode === 'container' ? (
+              <>
+                {field('容器内媒体根目录', <Input value={cfg.paths.containerMediaRoot} onChange={(e) => updatePathsConfig({ containerMediaRoot: e.target.value })} placeholder="/media" />)}
+                {field('宿主媒体根目录', <Input value={cfg.paths.hostMediaRoot} onChange={(e) => updatePathsConfig({ hostMediaRoot: e.target.value })} placeholder="/volume1/media" />)}
+                {field('容器内下载根目录', <Input value={cfg.paths.containerDownloadRoot} onChange={(e) => updatePathsConfig({ containerDownloadRoot: e.target.value })} placeholder="/downloads" />)}
+                {field('宿主下载根目录', <Input value={cfg.paths.hostDownloadRoot} onChange={(e) => updatePathsConfig({ hostDownloadRoot: e.target.value })} placeholder="/volume1/qBittorent" />)}
+              </>
+            ) : (
+              <>
+                {field('媒体根目录', <Input value={cfg.paths.hostMediaRoot} onChange={(e) => updatePathsConfig({ hostMediaRoot: e.target.value })} placeholder="/media" />)}
+                {field('下载根目录', <Input value={cfg.paths.hostDownloadRoot} onChange={(e) => updatePathsConfig({ hostDownloadRoot: e.target.value })} placeholder="/downloads" />)}
+              </>
+            )}
+            {rootsDiffer && (
+              <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950 p-2">
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  根目录已修改，需重建容器才能生效（约 1~5 分钟）
+                </p>
+                <Button size="sm" onClick={rebuildContainer} disabled={restarting}>
+                  {restarting && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  立即重建容器
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Default fallback subdirs */}
+          <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+            <p className="text-sm font-medium">默认目录（匹配不到规则时用，相对于媒体根目录）</p>
+            {field('默认电影库子目录', <Input value={cfg.paths.defaultMovieSubdir} onChange={(e) => updatePathsConfig({ defaultMovieSubdir: e.target.value })} placeholder="movies" />)}
+            {field('默认剧集库子目录', <Input value={cfg.paths.defaultTvSubdir} onChange={(e) => updatePathsConfig({ defaultTvSubdir: e.target.value })} placeholder="tv" />)}
           </div>
 
           {/* Rules */}
@@ -470,12 +563,13 @@ export default function SettingsPage() {
 
           {cfg.paths.rules.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              暂无分类规则，所有媒体整理到默认目录。点「添加规则」为华语电影、日漫等类别指定独立目录。
+              暂无分类规则，所有媒体整理到默认目录。点「添加规则」为华语电影、日漫等类别指定独立子目录。
             </p>
           )}
 
           {cfg.paths.rules.map((r) => {
             const catOpt = CATEGORY_OPTIONS.find((c) => c.value === r.category);
+            const mediaRoot = cfg.paths.deploymentMode === 'container' ? cfg.paths.containerMediaRoot : cfg.paths.hostMediaRoot;
             return (
               <div key={r.id} className="rounded-md border p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -511,24 +605,19 @@ export default function SettingsPage() {
                     <option value="move">移动</option>
                   </select>
                 )}
-                {cfg.paths.deploymentMode === 'container' ? (
-                  <>
-                    {field('容器内媒体目录', <Input value={r.containerMediaDir} onChange={(e) => updateRule(r.id, { containerMediaDir: e.target.value })} placeholder="/media/movies/华语电影" />)}
-                    {field('宿主媒体目录', <Input value={r.hostMediaDir} onChange={(e) => updateRule(r.id, { hostMediaDir: e.target.value })} placeholder="/volume1/media/moive/华语电影" />)}
-                    {field('容器内下载目录', <Input value={r.containerDownloadDir} onChange={(e) => updateRule(r.id, { containerDownloadDir: e.target.value })} placeholder="/downloads" />)}
-                    {field('宿主下载目录', <Input value={r.hostDownloadDir} onChange={(e) => updateRule(r.id, { hostDownloadDir: e.target.value })} placeholder="/volume1/qBittorent" />)}
-                  </>
-                ) : (
-                  <>
-                    {field('媒体目录', <Input value={r.hostMediaDir} onChange={(e) => updateRule(r.id, { hostMediaDir: e.target.value })} placeholder="/media/movies/华语电影" />)}
-                    {field('下载目录', <Input value={r.hostDownloadDir} onChange={(e) => updateRule(r.id, { hostDownloadDir: e.target.value })} placeholder="/downloads" />)}
-                  </>
-                )}
+                <div>
+                  {field('媒体子目录', <Input value={r.mediaSubdir} onChange={(e) => updateRule(r.id, { mediaSubdir: e.target.value })} placeholder="如 moive/华语电影（留空 = 媒体根目录）" />)}
+                  <p className="mt-1 text-xs text-muted-foreground text-right">→ {joinRoot(mediaRoot, r.mediaSubdir)}</p>
+                </div>
+                <div>
+                  {field('下载子目录', <Input value={r.downloadSubdir} onChange={(e) => updateRule(r.id, { downloadSubdir: e.target.value })} placeholder="如 华语电影（留空 = 下载根目录）" />)}
+                  <p className="mt-1 text-xs text-muted-foreground text-right">qb 保存到 → {joinRoot(cfg.paths.hostDownloadRoot, r.downloadSubdir)}</p>
+                </div>
               </div>
             );
           })}
           <p className="text-xs text-muted-foreground">
-            整理时按 TMDB 元数据（类型/地区/语言/动画标签）推断媒体类别，匹配对应规则整理到指定目录。容器部署需填容器内/外两套目录（app 容器视角 + qb/媒体库视角）；独立部署只需一套。下载时会记录所用规则，编辑规则后老下载仍按原规则整理。
+            整理时按 TMDB 元数据（类型/地区/语言/动画标签）推断媒体类别，匹配规则后整理到「媒体根目录 + 媒体子目录」。子目录填相对路径即可（也可填绝对路径，此时不受根目录约束）。修改公共根目录需要重建容器生效；新增/修改子目录即时生效，无需重启。下载时会记录所用规则，编辑规则后老下载仍按原规则整理。
           </p>
         </CardContent>
       </Card>

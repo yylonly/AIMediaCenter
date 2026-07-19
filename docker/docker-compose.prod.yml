@@ -25,9 +25,15 @@ services:
       - QB_CATEGORY_TV=${QB_CATEGORY_TV:-tv}
       - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
-      - DOWNLOAD_DIR=/downloads
-      - LIBRARY_DIR_MOVIE=/media/movies
-      - LIBRARY_DIR_TV=/media/tv
+      - DOWNLOAD_DIR=${CONTAINER_DOWNLOAD_ROOT:-/downloads}
+      - LIBRARY_DIR_MOVIE=${CONTAINER_MEDIA_ROOT:-/media}/movies
+      - LIBRARY_DIR_TV=${CONTAINER_MEDIA_ROOT:-/media}/tv
+      # Roots currently in effect, passed through so the app can tell the
+      # settings UI whether edited roots need a container rebuild.
+      - HOST_MEDIA_ROOT=${HOST_MEDIA_ROOT:-/volume1/media}
+      - HOST_DOWNLOAD_ROOT=${HOST_DOWNLOAD_ROOT:-/volume1/downloads}
+      - CONTAINER_MEDIA_ROOT=${CONTAINER_MEDIA_ROOT:-/media}
+      - CONTAINER_DOWNLOAD_ROOT=${CONTAINER_DOWNLOAD_ROOT:-/downloads}
       - TRANSFER_TYPE=${TRANSFER_TYPE:-link}
       - MOVIE_RENAME_FORMAT=${MOVIE_RENAME_FORMAT:-{{title}} ({{year}})/{{title}} ({{year}}){{ ' - ' + resourcePix if resourcePix }}{{fileExt}}}
       - TV_RENAME_FORMAT=${TV_RENAME_FORMAT:-{{title}} ({{year}})/Season {{season}}/{{title}} - S{{season | pad2}}E{{episode | pad2}}{{fileExt}}}
@@ -37,6 +43,8 @@ services:
       - CRON_MEDIASERVER_SYNC=${CRON_MEDIASERVER_SYNC:-0 3 * * *}
     volumes:
       - /volume1/docker/aimediacenter/config:/config
-      - /volume1/docker/aimediacenter/downloads:/downloads
-      - /volume1/docker/aimediacenter/media/movies:/media/movies
-      - /volume1/docker/aimediacenter/media/tv:/media/tv
+      # Single-root mounts: category subdirs live under these roots, so new
+      # rules never require mount changes. Roots are .env-driven; the in-app
+      # "rebuild container" flow rewrites them in .env and recreates.
+      - ${HOST_DOWNLOAD_ROOT:-/volume1/downloads}:${CONTAINER_DOWNLOAD_ROOT:-/downloads}
+      - ${HOST_MEDIA_ROOT:-/volume1/media}:${CONTAINER_MEDIA_ROOT:-/media}

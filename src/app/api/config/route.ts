@@ -22,13 +22,26 @@ export async function GET(req: NextRequest) {
   // array. loadPaths() already migrates legacy configs.
   try {
     const paths = await loadPaths();
+    const root = paths.deploymentMode === 'container' ? paths.containerMediaRoot : paths.hostMediaRoot;
+    const join = (r: string, s: string) =>
+      !s ? r : s.startsWith('/') ? s : `${r.replace(/\/$/, '')}/${s}`;
     out.pathsActive = {
-      movie: paths.defaultMovieDir,
-      tv: paths.defaultTvDir
+      movie: join(root, paths.defaultMovieSubdir),
+      tv: join(root, paths.defaultTvSubdir)
     };
   } catch {
     /* paths not configured yet - skip */
   }
+  // The roots currently in effect (from the container's env / volume mounts).
+  // The settings UI diffs these against the desired (DB) roots to know when a
+  // container rebuild is needed. Empty when not running under the managed
+  // docker deployment.
+  out.activeRoots = {
+    hostMediaRoot: process.env.HOST_MEDIA_ROOT || '',
+    hostDownloadRoot: process.env.HOST_DOWNLOAD_ROOT || '',
+    containerMediaRoot: process.env.CONTAINER_MEDIA_ROOT || '',
+    containerDownloadRoot: process.env.CONTAINER_DOWNLOAD_ROOT || ''
+  };
   return NextResponse.json(out);
 }
 
