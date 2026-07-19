@@ -32,7 +32,9 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # PAT (classic, scope: write:packages) stored in repo secrets.
+          # GITHUB_TOKEN package access proved unreliable for this repo.
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Extract metadata (tags, labels)
         id: meta
