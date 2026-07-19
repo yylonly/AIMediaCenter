@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api';
+import { prisma } from '@/lib/prisma';
 import {
   listTorrents,
   pauseTorrent,
@@ -13,7 +14,17 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const status = (url.searchParams.get('status') as 'completed' | 'downloading' | 'all' | null) || 'all';
   const list = await listTorrents({ status });
-  return NextResponse.json({ items: list });
+  // Annotate each torrent with whether it has been organised successfully,
+  // so the UI can offer a manual-organize button for the rest.
+  const hashes = list.map((t) => t.hash).filter(Boolean) as string[];
+  const done = await prisma.transferHistory.findMany({
+    where: { downloadHash: { in: hashes }, status: true },
+    select: { downloadHash: true }
+  });
+  const doneSet = new Set(done.map((d) => d.downloadHash));
+  return NextResponse.json({
+    items: list.map((t) => ({ ...t, organized: doneSet.has(t.hash) }))
+  });
 }
 
 export async function POST(req: NextRequest) {

@@ -217,6 +217,25 @@ export async function loadRuleById(id?: string | null): Promise<PathRule | null>
   return cfg.rules.find((r) => r.id === id) || null;
 }
 
+export interface QbPathHint {
+  contentPath?: string;
+  savePath: string;
+  name: string;
+}
+
+/**
+ * Translate a qb-reported content path (qb's host view) into the app-view
+ * path using the rule's download dirs. Shared by transferPoll and the
+ * manual-organize endpoint.
+ */
+export function resolveAppViewPath(t: QbPathHint, rule: PathRule | null, cfg: PathsConfig): string {
+  const { qbDir, appDir } = resolveDownloadDirs(rule, cfg);
+  const qbPath = qbDir.replace(/\/$/, '');
+  const appPath = appDir.replace(/\/$/, '');
+  const containerPath = t.contentPath || `${t.savePath.replace(/\/$/, '')}/${t.name}`;
+  return qbPath && qbPath !== appPath ? containerPath.replace(qbPath, appPath) : containerPath;
+}
+
 interface Naming {
   movie: string;
   tv: string;

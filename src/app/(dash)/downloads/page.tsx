@@ -8,7 +8,7 @@ import { Table, THead, TBody, Tr, Th, Td } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { formatSize } from '@/lib/utils';
-import { Pause, Play, Trash2, RefreshCw } from 'lucide-react';
+import { Pause, Play, Trash2, RefreshCw, FolderOutput, Loader2 } from 'lucide-react';
 
 function formatRatio(uploaded: number, downloaded: number): string {
   if (downloaded === 0) return uploaded > 0 ? '∞' : '—';
@@ -28,12 +28,14 @@ interface Torrent {
   savePath: string;
   category: string;
   eta: number;
+  organized?: boolean;
 }
 
 export default function DownloadsPage() {
   const [items, setItems] = useState<Torrent[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [organizing, setOrganizing] = useState<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -62,6 +64,32 @@ export default function DownloadsPage() {
       toast.success('操作成功');
       reload();
     } else toast.error('操作失败');
+  }
+
+  async function organizeNow(hash: string) {
+    setOrganizing((prev) => new Set(prev).add(hash));
+    try {
+      const res = await fetch('/api/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ downloadHash: hash })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        toast.success(`整理完成：${d.transferred} 个文件`);
+      } else {
+        toast.error(d.error || (d.errors && d.errors[0]) || '整理失败');
+      }
+      reload();
+    } catch (e) {
+      toast.error(`整理失败：${(e as Error).message}`);
+    } finally {
+      setOrganizing((prev) => {
+        const next = new Set(prev);
+        next.delete(hash);
+        return next;
+      });
+    }
   }
 
   async function batchRemove() {
@@ -156,6 +184,21 @@ export default function DownloadsPage() {
                   <Td>{t.uploadSpeed > 0 ? `${formatSize(t.uploadSpeed)}/s` : '—'}</Td>
                   <Td className="text-xs font-mono">{formatRatio(t.uploaded, t.downloaded)}</Td>
                   <Td className="flex gap-1">
+                    {t.progress >= 1 && !t.organized && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        title="手动整理到媒体库"
+                        disabled={organizing.has(t.hash)}
+                        onClick={() => organizeNow(t.hash)}
+                      >
+                        {organizing.has(t.hash) ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FolderOutput className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
                     {t.state.includes('paused') ? (
                       <Button size="icon" variant="ghost" onClick={() => act(t.hash, 'resume')}>
                         <Play className="h-4 w-4" />
