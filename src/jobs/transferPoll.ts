@@ -45,12 +45,17 @@ export async function transferPoll(): Promise<void> {
         ? containerPath.replace(qbPath, appPath)
         : containerPath;
       console.log(`[transferPoll] organising ${hostPath} (qb: ${containerPath})`);
-      await organize({
+      const result = await organize({
         source: hostPath,
         downloadHash: hash,
         tmdbid: history.tmdbid ?? undefined,
         mtype: (history.type as 'movie' | 'tv') || undefined
       });
+      if (!result.ok) {
+        console.warn(`[transferPoll] failed ${hash}:`, result.errors.join('; '));
+      } else {
+        console.log(`[transferPoll] done ${hash}: ${result.transferred} file(s)`);
+      }
     } catch (e) {
       console.warn('[transferPoll] failed', hash, (e as Error).message);
     } finally {
