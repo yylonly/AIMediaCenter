@@ -199,11 +199,36 @@ export default function SettingsPage() {
     setLoading(false);
   }
 
+  const [jfTesting, setJfTesting] = useState(false);
+  const [jfSyncing, setJfSyncing] = useState(false);
+
   async function testJellyfin() {
-    const r = await fetch('/api/mediaserver/refresh?action=sync', { method: 'POST' });
-    const d = await r.json();
-    if (d.ok) toast.success(`Jellyfin 同步了 ${d.synced} 个条目`);
-    else toast.error(d.error || 'Jellyfin 连接失败');
+    setJfTesting(true);
+    try {
+      // Lightweight connectivity check (/System/Info), NOT a library sync.
+      const r = await fetch('/api/mediaserver?action=status');
+      const d = await r.json();
+      if (d.connected) toast.success(`Jellyfin 连接正常（已缓存 ${d.movieCount} 电影 / ${d.seriesCount} 剧集）`);
+      else toast.error(`Jellyfin 连接失败${d.error ? `：${d.error}` : ''}`);
+    } catch (e) {
+      toast.error(`Jellyfin 测试失败：${(e as Error).message}`);
+    } finally {
+      setJfTesting(false);
+    }
+  }
+
+  async function syncJellyfinLib() {
+    setJfSyncing(true);
+    try {
+      const r = await fetch('/api/mediaserver/refresh?action=sync', { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) toast.success(`Jellyfin 同步了 ${d.synced} 个条目`);
+      else toast.error(d.error || 'Jellyfin 同步失败');
+    } catch (e) {
+      toast.error(`Jellyfin 同步失败：${(e as Error).message}`);
+    } finally {
+      setJfSyncing(false);
+    }
   }
 
   async function testQb() {
@@ -509,8 +534,13 @@ export default function SettingsPage() {
         <CardContent className="space-y-3">
           {field('URL', <Input value={cfg.jellyfin.url} onChange={(e) => set('jellyfin', 'url', e.target.value)} placeholder="http://127.0.0.1:8096" />)}
           {field('API Key', <Input value={cfg.jellyfin.apiKey} onChange={(e) => set('jellyfin', 'apiKey', e.target.value)} />)}
-          <div className="text-right">
-            <Button variant="outline" size="sm" onClick={testJellyfin}>测试连接（同步媒体库）</Button>
+          <div className="text-right space-x-2">
+            <Button variant="outline" size="sm" onClick={testJellyfin} disabled={jfTesting}>
+              {jfTesting && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}测试连接
+            </Button>
+            <Button variant="outline" size="sm" onClick={syncJellyfinLib} disabled={jfSyncing}>
+              {jfSyncing && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}同步媒体库
+            </Button>
           </div>
         </CardContent>
       </Card>

@@ -35,7 +35,11 @@ export async function refreshJellyfin(): Promise<boolean> {
   try {
     const url = cfg.url.replace(/\/$/, '') + '/Library/Refresh';
     const res = await fetch(url, { method: 'POST', headers: authHeaders(cfg.apiKey) });
-    return res.ok;
+    if (!res.ok) {
+      console.warn(`[jellyfin] refresh returned HTTP ${res.status} (check api key / url)`);
+      return false;
+    }
+    return true;
   } catch (e) {
     console.warn('[jellyfin] refresh failed', (e as Error).message);
     return false;
