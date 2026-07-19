@@ -130,15 +130,27 @@ export default function SettingsPage() {
         let paths: PathsCfg;
         if (Array.isArray(rawPaths.rules)) {
           // Current shape (subdir rules) or previous 4-dir rules shape.
+          // Legacy migration prefers stripping the host dir by the host root
+          // (host paths carry the real dir names; container paths may be
+          // mount aliases).
+          const roots = rootsOf(rawPaths);
           paths = {
-            ...rootsOf(rawPaths),
+            ...roots,
             rules: rawPaths.rules.map((r: any) => ({
               id: r.id || 'r_' + Math.random().toString(36).slice(2, 8),
               name: r.name || '',
               category: r.category || 'foreign-movie',
               transferType: r.transferType || 'link',
-              mediaSubdir: r.mediaSubdir ?? stripRoot(r.containerMediaDir || '/media/movies', '/media'),
-              downloadSubdir: r.downloadSubdir ?? stripRoot(r.containerDownloadDir || '/downloads', '/downloads'),
+              mediaSubdir:
+                r.mediaSubdir ??
+                (r.hostMediaDir
+                  ? stripRoot(r.hostMediaDir, roots.hostMediaRoot)
+                  : stripRoot(r.containerMediaDir || '/media/movies', roots.containerMediaRoot)),
+              downloadSubdir:
+                r.downloadSubdir ??
+                (r.hostDownloadDir
+                  ? stripRoot(r.hostDownloadDir, roots.hostDownloadRoot)
+                  : stripRoot(r.containerDownloadDir || '/downloads', roots.containerDownloadRoot)),
               enabled: r.enabled !== false
             }))
           };

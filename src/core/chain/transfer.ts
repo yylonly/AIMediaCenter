@@ -71,19 +71,39 @@ function stripRoot(p: string, root: string): string {
   return p;
 }
 
-/** Coerce a partially-saved (or legacy 4-dir) rule into the subdir shape. */
+/**
+ * Coerce a partially-saved (or legacy 4-dir) rule into the subdir shape.
+ * Legacy migration prefers stripping the host dir by the host root (the host
+ * path carries the real directory names; container paths may be mount
+ * aliases), falling back to the container dir.
+ */
 function normalizeRule(
-  r: Partial<PathRule> & { id: string; containerMediaDir?: string; containerDownloadDir?: string }
+  r: Partial<PathRule> & {
+    id: string;
+    containerMediaDir?: string;
+    hostMediaDir?: string;
+    containerDownloadDir?: string;
+    hostDownloadDir?: string;
+  },
+  roots: { containerMediaRoot: string; hostMediaRoot: string; containerDownloadRoot: string; hostDownloadRoot: string }
 ): PathRule {
+  const mediaSubdir =
+    r.mediaSubdir ??
+    (r.hostMediaDir
+      ? stripRoot(r.hostMediaDir, roots.hostMediaRoot)
+      : stripRoot(r.containerMediaDir || '/media/movies', roots.containerMediaRoot));
+  const downloadSubdir =
+    r.downloadSubdir ??
+    (r.hostDownloadDir
+      ? stripRoot(r.hostDownloadDir, roots.hostDownloadRoot)
+      : stripRoot(r.containerDownloadDir || '/downloads', roots.containerDownloadRoot));
   return {
     id: r.id,
     name: r.name || '',
     category: r.category || 'foreign-movie',
     transferType: (r.transferType as TransferMode) || 'link',
-    mediaSubdir:
-      r.mediaSubdir ?? stripRoot(r.containerMediaDir || '/media/movies', '/media'),
-    downloadSubdir:
-      r.downloadSubdir ?? stripRoot(r.containerDownloadDir || '/downloads', '/downloads'),
+    mediaSubdir,
+    downloadSubdir,
     enabled: r.enabled !== false
   };
 }
@@ -114,7 +134,8 @@ export async function loadPaths(): Promise<PathsConfig> {
     const v = JSON.parse(row.value) as Record<string, unknown>;
     // Current & previous shapes: { deploymentMode, rules[], ... }
     if (Array.isArray(v.rules)) {
-      return { ...roots(v), rules: (v.rules as PathRule[]).map(normalizeRule) };
+      const r = roots(v);
+      return { ...r, rules: (v.rules as PathRule[]).map((rule) => normalizeRule(rule, r)) };
     }
     // Legacy multi-profile shape: take the active profile's movie/tv as defaults.
     if (Array.isArray(v.profiles) && v.profiles.length > 0) {
