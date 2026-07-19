@@ -252,6 +252,27 @@ export default function SettingsPage() {
     }
   }
 
+  const [subTesting, setSubTesting] = useState(false);
+
+  async function testSubtitle() {
+    setSubTesting(true);
+    try {
+      // Send the current form values so the user can test before saving.
+      const r = await fetch('/api/subtitle/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg.subtitle)
+      });
+      const d = await r.json();
+      if (d.ok) toast.success(d.detail || 'OpenSubtitles 连接正常');
+      else toast.error(d.error || 'OpenSubtitles 连接失败');
+    } catch (e) {
+      toast.error(`OpenSubtitles 测试失败：${(e as Error).message}`);
+    } finally {
+      setSubTesting(false);
+    }
+  }
+
   async function testQb() {
     const r = await fetch('/api/qb/test', { method: 'POST' });
     const d = await r.json();
@@ -623,6 +644,11 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             需要在 <a className="underline" href="https://www.opensubtitles.com" target="_blank" rel="noreferrer">opensubtitles.com</a> 注册免费账号并生成 API Key。仅 API Key 时下载 5 次/天，填账号密码后 20 次/天；整季整理遇额度耗尽会自动跳过剩余集。下载请求走代理（需在上方代理卡勾选「字幕」或开全局）。
           </p>
+          <div className="text-right">
+            <Button variant="outline" size="sm" onClick={testSubtitle} disabled={subTesting}>
+              {subTesting && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}测试连接
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

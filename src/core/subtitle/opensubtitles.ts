@@ -174,6 +174,54 @@ export async function searchSubtitles(cfg: SubtitleConfig, q: OsSearchQuery): Pr
 export class QuotaExceededError extends Error {}
 
 /**
+ * Connectivity test for the settings page. With account credentials it does a
+ * real login and reports the remaining daily quota; with only an API key it
+ * does a minimal anonymous search to validate the key. Does not touch the
+ * cached JWT (tests exactly what was passed in).
+ */
+export async function testConnection(
+  cfg: SubtitleConfig
+): Promise<{ ok: boolean; detail?: string; error?: string }> {
+  if (!cfg.apiKey) return { ok: false, error: 'API Key 未填写' };
+  try {
+    if (cfg.username && cfg.password) {
+      const res = await fetchWithProxy('subtitles', `${API}/login`, {
+        method: 'POST',
+        headers: { 'Api-Key': cfg.apiKey, 'User-Agent': UA, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cfg.username, password: cfg.password })
+      });
+      if (!res.ok) {
+        return { ok: false, error: `登录失败 HTTP ${res.status}（检查 API Key / 账号密码，或代理「字幕」开关）` };
+      }
+      const d = (await res.json()) as { token?: string };
+      if (!d.token) return { ok: false, error: '登录成功但未返回 token' };
+      const ui = await fetchWithProxy('subtitles', `${API}/infos/user`, {
+        headers: { 'Api-Key': cfg.apiKey, 'User-Agent': UA, Authorization: `Bearer ${d.token}` }
+      });
+      if (ui.ok) {
+        const u = (await ui.json()) as { data?: { allowed_downloads?: number; remaining?: number; level?: string } };
+        const remaining = u.data?.remaining ?? u.data?.allowed_downloads;
+        return { ok: true, detail: `账号 ${cfg.username} 登录正常，今日剩余下载 ${remaining ?? '?'} 次` };
+      }
+      return { ok: true, detail: `账号 ${cfg.username} 登录正常` };
+    }
+    // Anonymous mode: validate the key with a minimal search.
+    const res = await fetchWithProxy(
+      'subtitles',
+      `${API}/subtitles?query=hello&per_page=1&languages=zh-CN`,
+      { headers: { 'Api-Key': cfg.apiKey, 'User-Agent': UA } }
+    );
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: `API Key 无效（HTTP ${res.status}）` };
+    }
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}（检查代理「字幕」开关）` };
+    return { ok: true, detail: 'API Key 有效（匿名模式，每天限 5 次下载，填账号可提额到 20 次）' };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/**
  * Download a subtitle file by file_id. Returns the subtitle text (utf-8).
  * Throws QuotaExceededError when the daily quota is exhausted so callers can
  * skip the rest of a batch quietly.
