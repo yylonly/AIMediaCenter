@@ -19,7 +19,7 @@ export const leetx: Indexer = {
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     }, ctx?.useProxy);
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error(`leetx list HTTP ${res.status}`);
     const html = await res.text();
     console.log('[leetx] html len', html.length, 'head', html.slice(0, 200));
     const $ = cheerio.load(html);
@@ -51,11 +51,11 @@ export const leetx: Indexer = {
           const detail = await fetchWithProxy('publicSites', BASE + r.page, {
             headers: { 'User-Agent': 'Mozilla/5.0 AIMediaCenter/0.1' }
           }, ctx?.useProxy);
-          if (!detail.ok) return null;
+          if (!detail.ok) throw new Error(`leetx detail HTTP ${detail.status} for ${r.page}`);
           const dh = await detail.text();
           const $d = cheerio.load(dh);
-          const magnet = $d('a[href^="magnet:"]').attr('href') || '';
-          if (!magnet) return null;
+          const magnet = $d('a[href^="magnet:"]').first().attr('href') || '';
+          if (!magnet) throw new Error(`leetx no magnet in detail (dh=${dh.length}B)`);
           return {
             key: `1337x:${r.page}`,
             site: '1337x',
@@ -71,7 +71,11 @@ export const leetx: Indexer = {
       );
       for (const rres of results) {
         if (rres.status === 'fulfilled' && rres.value) out.push(rres.value);
+        else if (rres.status === 'rejected') console.warn('[leetx] detail failed:', rres.reason?.message || rres.reason);
       }
+    }
+    if (out.length === 0 && rows.length > 0) {
+      throw new Error(`leetx 0 results from ${rows.length} rows (all detail fetches failed)`);
     }
     return out;
   }
