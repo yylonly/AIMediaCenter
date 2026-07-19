@@ -36,6 +36,11 @@ export const leetx: Indexer = {
       if (title && page) rows.push({ title, page, size, seeders, peers });
     });
 
+    // TEMP DEBUG: surface what the indexer actually received/parsed.
+    if (rows.length === 0) {
+      throw new Error(`leetx 0 rows (html=${html.length}B, hasTable=${$('table.table-list').length}, tbodyTr=${$('table.table-list tbody tr').length}, head=${html.slice(0, 120).replace(/\s+/g, ' ')})`);
+    }
+
     // Fetch each detail page in parallel (bounded) to obtain magnet link
     const out: TorrentInfo[] = [];
     const chunks: Array<typeof rows> = [];
