@@ -275,7 +275,8 @@ export async function organize(opts: TransferOptions): Promise<{
       await prisma.transferHistory.create({
         data: {
           src,
-          mode,
+          dest: '',
+          mode: opts.mode || 'link',
           type: opts.mtype || 'movie',
           title: path.basename(src),
           status: false,
