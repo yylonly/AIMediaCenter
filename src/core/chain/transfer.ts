@@ -7,6 +7,7 @@ import { walkVideos, findSubtitles, transferFile, type TransferMode } from '@/co
 import { buildRenameCtx, renderPath } from '@/core/transfer/rename';
 import { scrapeMedia } from '@/core/tmdb/scraper';
 import { refreshJellyfin } from '@/core/mediaserver/jellyfin';
+import { inferMediaCategory, categoryType, type MediaCategory, type MediaType } from '@/core/transfer/category';
 
 export interface PathRule {
   id: string;
