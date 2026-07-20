@@ -137,13 +137,18 @@ async function searchVariants(
   sub: { name: string; type: string },
   detail: { title?: string; originalTitle?: string; altTitles?: string[] } | null
 ): Promise<TorrentInfo[]> {
-  const keywords = [
+  const base = [
     ...new Set(
       [sub.name, detail?.title, detail?.originalTitle, ...(detail?.altTitles || [])].filter(
         (s): s is string => !!s
       )
     )
   ].slice(0, 4);
+  // PT sites index torrent titles literally, usually dot-separated
+  // ("Love.For.You") - a spaced query ("Love for You") misses them.
+  const keywords = [
+    ...new Set(base.flatMap((k) => (k.includes(' ') ? [k, k.replace(/\s+/g, '.')] : [k])))
+  ].slice(0, 8);
   const seen = new Set<string>();
   const out: TorrentInfo[] = [];
   for (const kw of keywords) {
