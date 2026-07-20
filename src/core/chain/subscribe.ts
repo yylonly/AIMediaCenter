@@ -78,6 +78,18 @@ function normTitle(s: string): string {
 }
 
 /**
+ * Loose name equality: exact match, or containment where the shorter name
+ * makes up most of the longer one. The ratio guard stops generic short
+ * names from matching unrelated longer titles, e.g. "Love For You" must
+ * not match "Immemorial Love For You".
+ */
+function looseEquals(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return long.includes(short) && short.length >= 6 && short.length / long.length >= 0.6;
+}
+
+/**
  * Relevance gate between a search result and the subscription. Without this,
  * sites that return their latest-uploads page for unmatched keywords would
  * flood the downloader with unrelated torrents (observed in production: one
@@ -95,9 +107,7 @@ function isRelevant(
   const candidates = [meta.cnName, meta.enName, meta.title]
     .filter((s): s is string => !!s)
     .map(normTitle);
-  const hit = candidates.some(
-    (c) => c && [...names].some((n) => n && (c.includes(n) || n.includes(c)))
-  );
+  const hit = candidates.some((c) => c && [...names].some((n) => n && looseEquals(c, n)));
   if (!hit) return false;
   const subYear = sub.year ? Number(sub.year) : null;
   const metaYear = meta.year ? Number(meta.year) : null;

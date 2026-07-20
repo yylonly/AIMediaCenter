@@ -100,21 +100,34 @@ export default function SubscribesPage() {
     }
   }
 
+  const [downloading, setDownloading] = useState(false);
+
   async function downloadSelected() {
     if (!modalId || selected.size === 0) return;
-    const res = await fetch(`/api/subscribes/${modalId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'download', keys: [...selected] })
-    });
-    const d = await res.json();
-    if (d.ok) {
-      const msg = d.skipped ? `已下载 ${d.picked} 个，跳过 ${d.skipped} 个（已存在）` : `已下载 ${d.picked} 个种子`;
-      toast.success(msg);
-      setModalOpen(false);
-      reload();
-    } else {
-      toast.error(d.error || '下载失败');
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/subscribes/${modalId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'download', keys: [...selected] })
+      });
+      const d = await res.json();
+      if (d.ok) {
+        if (d.picked > 0) {
+          const msg = d.skipped ? `已下载 ${d.picked} 个，跳过 ${d.skipped} 个（已存在）` : `已下载 ${d.picked} 个种子`;
+          toast.success(msg);
+          setModalOpen(false);
+          reload();
+        } else {
+          toast.error(d.skipped ? `${d.skipped} 个种子下载失败（可能已失效）` : '没有可下载的种子（搜索结果可能已变化，请重新预览）');
+        }
+      } else {
+        toast.error(d.error || '下载失败');
+      }
+    } catch (e) {
+      toast.error(`下载失败：${(e as Error).message}`);
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -218,23 +231,25 @@ export default function SubscribesPage() {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} />
+              <div className="flex items-center gap-2 text-sm cursor-pointer" onClick={toggleSelectAll}>
+                <Checkbox checked={allSelected} onCheckedChange={() => {}} className="pointer-events-none" />
                 全选 / 取消全选
-              </label>
-              <Button size="sm" onClick={downloadSelected} disabled={selected.size === 0}>
-                下载选中 ({selected.size})
+              </div>
+              <Button size="sm" onClick={downloadSelected} disabled={selected.size === 0 || downloading}>
+                {downloading ? '下载中...' : `下载选中 (${selected.size})`}
               </Button>
             </div>
             <div className="space-y-2 max-h-[50vh] overflow-auto">
               {torrents.map((t) => (
-                <label
+                <div
                   key={t.key}
+                  onClick={() => toggleSelect(t.key)}
                   className="flex items-start gap-3 p-3 rounded border hover:bg-muted/50 cursor-pointer"
                 >
                   <Checkbox
                     checked={selected.has(t.key)}
-                    onCheckedChange={() => toggleSelect(t.key)}
+                    onCheckedChange={() => {}}
+                    className="pointer-events-none"
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate" title={t.title}>{t.title}</p>
@@ -242,7 +257,7 @@ export default function SubscribesPage() {
                       {t.site} · 种子 {t.seeders} · {(t.size / 1024 / 1024).toFixed(0)} MB
                     </p>
                   </div>
-                </label>
+                </div>
               ))}
             </div>
           </div>
