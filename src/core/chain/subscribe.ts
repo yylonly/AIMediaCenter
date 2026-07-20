@@ -100,7 +100,8 @@ function isRelevant(
   );
   if (!hit) return false;
   const subYear = sub.year ? Number(sub.year) : null;
-  if (subYear && meta.year && Math.abs(subYear - meta.year) > 1) return false;
+  const metaYear = meta.year ? Number(meta.year) : null;
+  if (subYear && metaYear && Math.abs(subYear - metaYear) > 1) return false;
   return true;
 }
 
