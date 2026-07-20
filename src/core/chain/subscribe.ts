@@ -72,6 +72,47 @@ function matchesResolution(title: string, resolution?: string | null): boolean {
   return title.toLowerCase().includes(resolution.toLowerCase());
 }
 
+/** Normalize a title for loose comparison: lowercase, strip all separators. */
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[\s.\-_·:：'"]+/g, '');
+}
+
+/**
+ * Relevance gate between a search result and the subscription. Without this,
+ * sites that return their latest-uploads page for unmatched keywords would
+ * flood the downloader with unrelated torrents (observed in production: one
+ * romanized-name subscription pulled 97 random torrents).
+ *
+ * A result is relevant when any parsed title candidate loosely matches any
+ * known name of the subscription (stored name + fresh TMDB title variants),
+ * and the years agree within ±1 when both are known.
+ */
+function isRelevant(
+  meta: ReturnType<typeof parseFilename>,
+  names: Set<string>,
+  sub: { year?: string | null }
+): boolean {
+  const candidates = [meta.cnName, meta.enName, meta.title]
+    .filter((s): s is string => !!s)
+    .map(normTitle);
+  const hit = candidates.some(
+    (c) => c && [...names].some((n) => n && (c.includes(n) || n.includes(c)))
+  );
+  if (!hit) return false;
+  const subYear = sub.year ? Number(sub.year) : null;
+  if (subYear && meta.year && Math.abs(subYear - meta.year) > 1) return false;
+  return true;
+}
+
+/** Known name variants of a subscription: stored name + fresh TMDB titles. */
+function subNames(sub: { name: string }, detail: { title?: string; originalTitle?: string } | null): Set<string> {
+  return new Set(
+    [sub.name, detail?.title, detail?.originalTitle]
+      .filter((s): s is string => !!s)
+      .map(normTitle)
+  );
+}
+
 /**
  * Full site search for one subscription: pick torrents, hand off to downloader,
  * update state.note (downloaded episodes) and lackEpisode.
@@ -85,11 +126,18 @@ async function searchOne(sub: Awaited<ReturnType<typeof prisma.subscribe.findFir
       matchesFilter(t.title, sub.include, sub.exclude) &&
       matchesResolution(t.title, sub.resolution)
   );
+  // Relevance gate: only keep results whose parsed title actually matches
+  // the subscription (protects against sites returning unrelated listings).
+  const names = subNames(sub, detail);
+  const relevant = filtered.filter((t) => isRelevant(parseFilename(t.title), names, sub));
+  if (filtered.length > 0) {
+    console.log(`[subscribe] ${sub.name}: ${filtered.length} hits, ${relevant.length} relevant`);
+  }
 
   const downloadedEps = new Set<number>(sub.note ? (JSON.parse(sub.note) as number[]) : []);
 
   let picked = 0;
-  for (const t of filtered) {
+  for (const t of relevant) {
     if (sub.type === 'movie') {
       // First matching wins
       const r = await submitDownload({ torrent: t, media: detail || undefined, username: sub.username ?? undefined });
@@ -104,9 +152,11 @@ async function searchOne(sub: Awaited<ReturnType<typeof prisma.subscribe.findFir
         const end = meta.episodeEnd ?? meta.episodeBegin;
         for (let e = meta.episodeBegin; e <= end; e++) eps.push(e);
       }
-      // Skip already-downloaded episodes
+      // Skip results with no parseable episode (movies, variety packs etc.)
+      // and episodes already downloaded.
+      if (eps.length === 0) continue;
       const newEps = eps.filter((e) => !downloadedEps.has(e));
-      if (eps.length && newEps.length === 0) continue;
+      if (newEps.length === 0) continue;
 
       const r = await submitDownload({ torrent: t, media: detail || undefined, username: sub.username ?? undefined });
       if (r.ok) {
@@ -159,11 +209,14 @@ export async function previewSubscription(id: number): Promise<{
   const sub = await prisma.subscribe.findUnique({ where: { id } });
   if (!sub) return { ok: false, torrents: [], error: 'subscription not found' };
   try {
+    const detail = sub.tmdbid ? await tmdbDetail(sub.tmdbid, sub.type as 'movie' | 'tv') : null;
     const results = await aggregatedSearch({ keyword: sub.name, mtype: sub.type as any });
+    const names = subNames(sub, detail);
     const filtered = results.filter(
       (t) =>
         matchesFilter(t.title, sub.include, sub.exclude) &&
-        matchesResolution(t.title, sub.resolution)
+        matchesResolution(t.title, sub.resolution) &&
+        isRelevant(parseFilename(t.title), names, sub)
     );
     return { ok: true, torrents: filtered };
   } catch (e) {
@@ -181,10 +234,12 @@ export async function downloadSelected(
   const detail = sub.tmdbid ? await tmdbDetail(sub.tmdbid, sub.type as 'movie' | 'tv') : null;
   try {
     const results = await aggregatedSearch({ keyword: sub.name, mtype: sub.type as any });
+    const names = subNames(sub, detail);
     const filtered = results.filter(
       (t) =>
         matchesFilter(t.title, sub.include, sub.exclude) &&
-        matchesResolution(t.title, sub.resolution)
+        matchesResolution(t.title, sub.resolution) &&
+        isRelevant(parseFilename(t.title), names, sub)
     );
     const selected = filtered.filter((t) => keys.includes(t.key));
 
