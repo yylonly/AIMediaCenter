@@ -106,12 +106,49 @@ function isRelevant(
 }
 
 /** Known name variants of a subscription: stored name + fresh TMDB titles. */
-function subNames(sub: { name: string }, detail: { title?: string; originalTitle?: string } | null): Set<string> {
+function subNames(
+  sub: { name: string },
+  detail: { title?: string; originalTitle?: string; altTitles?: string[] } | null
+): Set<string> {
   return new Set(
-    [sub.name, detail?.title, detail?.originalTitle]
+    [sub.name, detail?.title, detail?.originalTitle, ...(detail?.altTitles || [])]
       .filter((s): s is string => !!s)
       .map(normTitle)
   );
+}
+
+/**
+ * Search each name variant (stored name + TMDB title/original/alt titles)
+ * and merge, deduplicating by torrent key. Subscriptions whose stored name
+ * is a romanization (e.g. "Ye Gou Gu Tou") find nothing on CN sites; the
+ * original-language variant (野狗骨头) is what those sites actually carry.
+ */
+async function searchVariants(
+  sub: { name: string; type: string },
+  detail: { title?: string; originalTitle?: string; altTitles?: string[] } | null
+): Promise<TorrentInfo[]> {
+  const keywords = [
+    ...new Set(
+      [sub.name, detail?.title, detail?.originalTitle, ...(detail?.altTitles || [])].filter(
+        (s): s is string => !!s
+      )
+    )
+  ].slice(0, 4);
+  const seen = new Set<string>();
+  const out: TorrentInfo[] = [];
+  for (const kw of keywords) {
+    try {
+      const results = await aggregatedSearch({ keyword: kw, mtype: sub.type as any });
+      for (const t of results) {
+        if (seen.has(t.key)) continue;
+        seen.add(t.key);
+        out.push(t);
+      }
+    } catch (e) {
+      console.warn(`[subscribe] search "${kw}" failed`, (e as Error).message);
+    }
+  }
+  return out;
 }
 
 /**
@@ -120,8 +157,7 @@ function subNames(sub: { name: string }, detail: { title?: string; originalTitle
  */
 async function searchOne(sub: Awaited<ReturnType<typeof prisma.subscribe.findFirstOrThrow>>) {
   const detail = sub.tmdbid ? await tmdbDetail(sub.tmdbid, sub.type as 'movie' | 'tv') : null;
-  const keyword = sub.name;
-  const results = await aggregatedSearch({ keyword, mtype: sub.type as any });
+  const results = await searchVariants(sub, detail);
   const filtered = results.filter(
     (t) =>
       matchesFilter(t.title, sub.include, sub.exclude) &&
@@ -211,7 +247,7 @@ export async function previewSubscription(id: number): Promise<{
   if (!sub) return { ok: false, torrents: [], error: 'subscription not found' };
   try {
     const detail = sub.tmdbid ? await tmdbDetail(sub.tmdbid, sub.type as 'movie' | 'tv') : null;
-    const results = await aggregatedSearch({ keyword: sub.name, mtype: sub.type as any });
+    const results = await searchVariants(sub, detail);
     const names = subNames(sub, detail);
     const filtered = results.filter(
       (t) =>
@@ -234,7 +270,7 @@ export async function downloadSelected(
   if (!sub) return { ok: false, picked: 0, skipped: 0, error: 'subscription not found' };
   const detail = sub.tmdbid ? await tmdbDetail(sub.tmdbid, sub.type as 'movie' | 'tv') : null;
   try {
-    const results = await aggregatedSearch({ keyword: sub.name, mtype: sub.type as any });
+    const results = await searchVariants(sub, detail);
     const names = subNames(sub, detail);
     const filtered = results.filter(
       (t) =>

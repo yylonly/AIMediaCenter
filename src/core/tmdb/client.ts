@@ -77,6 +77,8 @@ export interface TmdbBrief {
   originCountry?: string[];
   /** ISO 639-1 original language (e.g. zh, ja, en). */
   originalLanguage?: string;
+  /** Alternative titles from TMDB (all regions), for name-variant matching. */
+  altTitles?: string[];
 }
 
 const IMG = 'https://image.tmdb.org/t/p/original';
@@ -151,6 +153,13 @@ export async function tmdbDetail(
         }
       }
     }
+    const altTitleNames: string[] = [
+      ...new Set(
+        (altTitles as Array<{ title?: string }>)
+          .map((a) => a.title)
+          .filter((s): s is string => !!s)
+      )
+    ];
     const brief: TmdbBrief = {
       tmdbid,
       imdbid: data.imdb_id || data.external_ids?.imdb_id,
@@ -171,7 +180,8 @@ export async function tmdbDetail(
       genres: data.genres?.map((g: any) => ({ id: g.id, name: g.name })),
       genreIds: data.genres?.map((g: any) => g.id),
       originCountry: data.origin_country || data.production_countries?.map((c: any) => c.iso_3166_1),
-      originalLanguage: data.original_language
+      originalLanguage: data.original_language,
+      altTitles: altTitleNames
     };
     cache.set(key, brief);
 
